@@ -4,7 +4,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-mod lib;
+use pixelox;
 
 const WINDOW_TITLE: &str = "Pixelox!";
 
@@ -23,7 +23,9 @@ pub async fn run() {
         .build(&event_loop)
         .unwrap();
 
-    let mut state = lib::State::new(&window).await;
+    let mut state = pixelox::State::new(&window).await;
+
+    let mut show: bool = false;
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -32,16 +34,34 @@ pub async fn run() {
         } if window_id == window.id() => {
             if !state.input(event) {
                 match event {
-                    WindowEvent::CloseRequested | WindowEvent::KeyboardInput {
+                    WindowEvent::CloseRequested
+                    | WindowEvent::KeyboardInput {
                         input:
                             KeyboardInput {
                                 state: ElementState::Pressed,
                                 virtual_keycode: Some(VirtualKeyCode::Escape),
                                 ..
+                            }
+                            | KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(VirtualKeyCode::Q),
+                                ..
                             },
                         ..
                     } => {
                         *control_flow = ControlFlow::Exit;
+                    },
+
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(VirtualKeyCode::Space),
+                                ..
+                            },
+                        ..
+                    } => {
+                        show = !show;
                     },
 
                     WindowEvent::Resized(physical_size) => {
