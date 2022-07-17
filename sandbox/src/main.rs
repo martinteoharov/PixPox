@@ -1,10 +1,10 @@
-use pixelox;
+use pixpox;
 
 fn main() {
     println!("Hello, world!");
-    //pixelox::window::initialize(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE);
+    //pixpox::window::initialize(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE);
 
-    pixelox::run();
+    pixpox::run();
 
     println!("Window created!");
 }
