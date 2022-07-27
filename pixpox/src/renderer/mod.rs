@@ -1,3 +1,8 @@
+/* renderer/mod.rs
+ *
+ * This file is the entry point for the renderer.
+ */
+
 use wgpu::{include_wgsl, util::DeviceExt};
 use winit::{event::WindowEvent, window::Window};
 

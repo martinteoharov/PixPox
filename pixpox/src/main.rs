@@ -1,6 +1,11 @@
 use pixpox;
 
 fn main() {
-    pollster::block_on(pixpox::GameState::init());
-    pollster::block_on(pixpox::GameState::run());
+    pollster::block_on(run());
+}
+
+async fn run() {
+    let mut game = pixpox::GameState::init().await;
+
+    game.run().await;
 }

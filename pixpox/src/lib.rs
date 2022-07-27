@@ -1,3 +1,8 @@
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
+
 use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -6,15 +11,16 @@ use winit::{
 };
 
 mod renderer;
+use renderer::State as Renderer;
 
 mod constants;
 use constants::WINDOW_TITLE;
 
 pub struct GameState {
-    pub renderer: renderer::State,
+    pub renderer: Renderer,
     pub event_loop: EventLoop<()>,
     pub window: Window,
-    pub exit: bool,
+    pub quit: bool,
 }
 
 impl GameState {
@@ -22,98 +28,91 @@ impl GameState {
         // Initialize WGPU logging
         env_logger::init();
 
-        // Main event loop
+        // Define the event loop
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
             .with_title(WINDOW_TITLE)
             .build(&event_loop)
             .unwrap();
 
-        let mut state = renderer::State::new(&window).await;
+        let renderer = Renderer::new(&window).await;
 
         Self {
-            renderer: state,
+            renderer,
             event_loop,
             window,
-            exit: false,
+            quit: false,
         }
     }
 
-    pub fn run(self) {
-        let Self {
-            mut event_loop,
-            renderer,
-            window,
-            ..
-        } = self;
+    pub fn quit(&mut self) {
+        self.quit = true;
+    }
 
-        event_loop.run_return(|event, _target, control_flow| match event {
-            Event::WindowEvent {
-                ref event,
-                window_id,
-            } if window_id == window.id() => {
-                if !renderer.input(event) {
-                    match event {
-                        WindowEvent::CloseRequested
-                        | WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    state: ElementState::Pressed,
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
-                                    ..
-                                }
-                                | KeyboardInput {
-                                    state: ElementState::Pressed,
-                                    virtual_keycode: Some(VirtualKeyCode::Q),
-                                    ..
-                                },
-                            ..
-                        } => {
-                            *control_flow = ControlFlow::Exit;
-                        },
+    pub async fn run(&mut self) {
+        self.event_loop.run_return(|event, _target, control_flow| {
+            if self.quit == true {
+                *control_flow = ControlFlow::Exit;
+            }
 
-                        // WindowEvent::KeyboardInput {
-                        //     input:
-                        //         KeyboardInput {
-                        //             state: ElementState::Pressed,
-                        //             virtual_keycode: Some(VirtualKeyCode::Space),
-                        //             ..
-                        //         },
-                        //     ..
-                        // } => {
-                        //     show = !show;
-                        // },
-                        WindowEvent::Resized(physical_size) => {
-                            renderer.resize(*physical_size);
-                        },
+            match event {
+                Event::WindowEvent {
+                    ref event,
+                    window_id,
+                } if window_id == self.window.id() => {
+                    if !self.renderer.input(event) {
+                        match event {
+                            WindowEvent::CloseRequested
+                            | WindowEvent::KeyboardInput {
+                                input:
+                                    KeyboardInput {
+                                        state: ElementState::Pressed,
+                                        virtual_keycode: Some(VirtualKeyCode::Escape),
+                                        ..
+                                    }
+                                    | KeyboardInput {
+                                        state: ElementState::Pressed,
+                                        virtual_keycode: Some(VirtualKeyCode::Q),
+                                        ..
+                                    },
+                                ..
+                            } => {
+                                *control_flow = ControlFlow::Exit;
+                            },
 
-                        WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                            renderer.resize(**new_inner_size);
-                        },
+                            WindowEvent::Resized(physical_size) => {
+                                self.renderer.resize(*physical_size);
+                            },
 
-                        _ => {},
+                            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                                self.renderer.resize(**new_inner_size);
+                            },
+
+                            _ => {},
+                        }
                     }
-                }
-            },
-            Event::RedrawRequested(window_id) if window_id == self.window.id() => {
-                renderer.update();
-                match renderer.render(None, None) {
-                    Ok(_) => {},
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => renderer.resize(self.renderer.size),
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => eprintln!("{:?}", e),
-                }
-            },
+                },
 
-            Event::MainEventsCleared => {
-                // RedrawRequested will only trigger once, unless we manually
-                // request it.
-                self.window.request_redraw();
-            },
-            _ => {},
+                Event::RedrawRequested(window_id) if window_id == self.window.id() => {
+                    self.renderer.update();
+                    match self.renderer.render(None, None) {
+                        Ok(_) => {},
+                        // Reconfigure the surface if lost
+                        Err(wgpu::SurfaceError::Lost) => self.renderer.resize(self.renderer.size.clone()),
+                        // The system is out of memory, we should probably quit
+                        Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                        // All other errors (Outdated, Timeout) should be resolved by the next frame
+                        Err(e) => eprintln!("{:?}", e),
+                    }
+                },
+
+                Event::MainEventsCleared => {
+                    // RedrawRequested will only trigger once, unless we manually
+                    // request it.
+                    self.window.request_redraw();
+                },
+                _ => {},
+            }
         });
     }
 }
