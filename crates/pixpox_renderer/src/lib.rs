@@ -6,10 +6,8 @@
 use wgpu::{include_wgsl, util::DeviceExt};
 use winit::{event::WindowEvent, window::Window};
 
-mod utils;
-
+use pixpox_utils;
 mod types;
-use types::*;
 
 const VERTICES: &[types::Vertex] = &[
     Vertex {
@@ -35,7 +33,6 @@ const VERTICES: &[types::Vertex] = &[
 ];
 
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
-
 
 pub struct State {
     surface: wgpu::Surface,

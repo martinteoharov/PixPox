@@ -13,9 +13,6 @@ use winit::{
 mod renderer;
 use renderer::State as Renderer;
 
-mod constants;
-use constants::WINDOW_TITLE;
-
 pub struct GameState {
     pub renderer: Renderer,
     pub event_loop: EventLoop<()>,
@@ -31,7 +28,7 @@ impl GameState {
         // Define the event loop
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
-            .with_title(WINDOW_TITLE)
+            .with_title("Kur")
             .build(&event_loop)
             .unwrap();
 
@@ -51,7 +48,7 @@ impl GameState {
 
     pub async fn run(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
-            if self.quit == true {
+            if self.quit {
                 *control_flow = ControlFlow::Exit;
             }
 
@@ -98,7 +95,9 @@ impl GameState {
                     match self.renderer.render(None, None) {
                         Ok(_) => {},
                         // Reconfigure the surface if lost
-                        Err(wgpu::SurfaceError::Lost) => self.renderer.resize(self.renderer.size.clone()),
+                        Err(wgpu::SurfaceError::Lost) => {
+                            self.renderer.resize(self.renderer.size.clone())
+                        },
                         // The system is out of memory, we should probably quit
                         Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                         // All other errors (Outdated, Timeout) should be resolved by the next frame

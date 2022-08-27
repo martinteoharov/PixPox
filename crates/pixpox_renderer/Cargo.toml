@@ -1,0 +1,7 @@
+[package]
+name = "pixpox_renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pixpox_utils = { path = "../pixpox_utils" }
