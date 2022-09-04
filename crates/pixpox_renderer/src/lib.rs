@@ -6,11 +6,13 @@
 use wgpu::{include_wgsl, util::DeviceExt};
 use winit::{event::WindowEvent, window::Window};
 
-use pixpox_utils;
 mod types;
+use types::*;
 
-const VERTICES: &[types::Vertex] = &[
-    Vertex {
+use pixpox_utils::{map_range};
+
+const VERTICES: &[Vertex] = &[
+    types::Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
         color: [0.5, 0.0, 0.5],
     },

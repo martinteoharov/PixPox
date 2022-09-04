@@ -3,6 +3,11 @@ name = "pixpox"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = [
+    "crates/*",
+]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -13,3 +18,7 @@ wgpu = "0.13"
 pollster = "0.2"
 bytemuck = { version = "1.4", features = [ "derive" ] }
 rand = "0.8"
+
+# Local Crates
+pixpox_renderer = { path = "crates/pixpox_renderer" }
+pixpox_utils = { path = "crates/pixpox_utils" }

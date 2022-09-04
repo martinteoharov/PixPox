@@ -4,4 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+winit = "0.26"
+env_logger = "0.9"
+log = "0.4"
+wgpu = "0.13"
+pollster = "0.2"
+bytemuck = { version = "1.4", features = [ "derive" ] }
+rand = "0.8"
+
+# Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
