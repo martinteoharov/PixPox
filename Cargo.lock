@@ -883,6 +883,9 @@ dependencies = [
  "bytemuck",
  "env_logger",
  "log",
+ "pixpox_app",
+ "pixpox_ecs",
+ "pixpox_physics",
  "pixpox_renderer",
  "pixpox_utils",
  "pollster",
@@ -894,6 +897,13 @@ dependencies = [
 [[package]]
 name = "pixpox_app"
 version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "pixpox_ecs",
+ "pixpox_renderer",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "pixpox_ecs"

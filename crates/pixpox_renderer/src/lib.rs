@@ -9,10 +9,10 @@ use winit::{event::WindowEvent, window::Window};
 mod types;
 use types::*;
 
-use pixpox_utils::{map_range};
+// use pixpox_utils::{map_range};
 
 const VERTICES: &[Vertex] = &[
-    types::Vertex {
+    Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
         color: [0.5, 0.0, 0.5],
     },
@@ -36,7 +36,7 @@ const VERTICES: &[Vertex] = &[
 
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
-pub struct State {
+pub struct Renderer {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -48,7 +48,7 @@ pub struct State {
     num_indices: u32,
 }
 
-impl State {
+impl Renderer {
     // Creating some of the wgpu types requires async code
     pub async fn new(window: &Window) -> Self {
         let size = window.inner_size();
@@ -185,8 +185,6 @@ impl State {
 
     pub fn render(
         &mut self,
-        vertex_buffer: Option<wgpu::Buffer>,
-        index_buffer: Option<wgpu::Buffer>,
     ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output

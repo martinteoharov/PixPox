@@ -20,5 +20,8 @@ bytemuck = { version = "1.4", features = [ "derive" ] }
 rand = "0.8"
 
 # Local Crates
+pixpox_app = { path = "crates/pixpox_app" }
+pixpox_ecs = { path = "crates/pixpox_ecs" }
+pixpox_physics = { path = "crates/pixpox_physics" }
 pixpox_renderer = { path = "crates/pixpox_renderer" }
 pixpox_utils = { path = "crates/pixpox_utils" }

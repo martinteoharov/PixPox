@@ -6,3 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+wgpu = "0.13"
+winit = "0.26"
+env_logger = "0.9"
+
+# Local crates
+pixpox_ecs = { path = "../pixpox_ecs" }
+pixpox_renderer = { path = "../pixpox_renderer" }
