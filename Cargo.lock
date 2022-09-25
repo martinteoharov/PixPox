@@ -908,6 +908,11 @@ dependencies = [
 [[package]]
 name = "pixpox_ecs"
 version = "0.1.0"
+dependencies = [
+ "bit-set",
+ "bit-vec",
+ "queues",
+]
 
 [[package]]
 name = "pixpox_physics"
@@ -974,6 +979,12 @@ name = "profiling"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f61dcf0b917cd75d4521d7343d1ffff3d1583054133c9b5cbea3375c703c40d"
+
+[[package]]
+name = "queues"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1475abae4f8ad4998590fe3acfe20104f0a5d48fc420c817cd2c09c3f56151f0"
 
 [[package]]
 name = "quote"

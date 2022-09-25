@@ -1,18 +1,32 @@
-use winit::{event_loop::{EventLoop, ControlFlow}, window::Window, window::WindowBuilder, event::{Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode}, platform::run_return::EventLoopExtRunReturn};
+use winit::{
+    dpi::{PhysicalSize, Size},
+    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    platform::run_return::EventLoopExtRunReturn,
+    window::Window,
+    window::WindowBuilder,
+};
 
 use pixpox_ecs::World;
 use pixpox_renderer::Renderer;
+
+pub struct AppConfig {
+    pub WINDOW_TITLE: &'static str,
+    pub WINDOW_WIDTH: u32,
+    pub WINDOW_HEIGHT: u32,
+    pub WINDOW_FULLSCREEN: bool,
+}
 
 pub struct App {
     pub world: World,
     pub renderer: Renderer,
     pub event_loop: EventLoop<()>,
     pub window: Window,
-    quit: bool
+    quit: bool,
 }
 
 impl App {
-    pub async fn new(title: &str) -> App {
+    pub async fn new(config: AppConfig) -> App {
         // Initialize WGPU logging
         env_logger::init();
 
@@ -21,7 +35,11 @@ impl App {
         // Define the event loop
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
-            .with_title(title)
+            .with_title(config.WINDOW_TITLE)
+            .with_inner_size(Size::Physical(PhysicalSize {
+                width: config.WINDOW_WIDTH,
+                height: config.WINDOW_HEIGHT,
+            }))
             .build(&event_loop)
             .unwrap();
 
@@ -32,7 +50,7 @@ impl App {
             renderer,
             event_loop,
             window,
-            quit: false
+            quit: false,
         }
     }
 
