@@ -10,6 +10,8 @@ use winit::{
 use pixpox_ecs::World;
 use pixpox_renderer::Renderer;
 
+use log::{info, warn};
+
 pub struct AppConfig {
     pub WINDOW_TITLE: &'static str,
     pub WINDOW_WIDTH: u32,
@@ -56,6 +58,9 @@ impl App {
 
     pub async fn run(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
+            // why?
+            self.world.run();
+
             if self.quit {
                 *control_flow = ControlFlow::Exit;
             }

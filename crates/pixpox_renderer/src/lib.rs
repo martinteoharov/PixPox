@@ -217,7 +217,6 @@ impl Renderer {
 
         render_pass.set_pipeline(&self.render_pipeline); // 2.
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // 1.
         render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // 2.
 

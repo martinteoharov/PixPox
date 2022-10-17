@@ -18,6 +18,7 @@ wgpu = "0.13"
 pollster = "0.2"
 bytemuck = { version = "1.4", features = [ "derive" ] }
 rand = "0.8"
+dotenv = "0.15.0"
 
 # Local Crates
 pixpox_app = { path = "crates/pixpox_app" }
