@@ -5,9 +5,10 @@ pub mod components;
 
 extern crate dotenv;
 
-use components::Player;
+use components::{Player, Pixel};
 use dotenv::dotenv;
 
+use log::{error, info};
 use pixpox::pixpox_app::App;
 use pixpox::pixpox_renderer::Renderer;
 use pixpox::pixpox_utils;
@@ -22,19 +23,22 @@ fn main() {
 }
 
 async fn run() {
-    // TODO: config read from file
+    // TODO: read config from file
     let config = AppConfig {
         WINDOW_TITLE: "pixpox!",
         WINDOW_WIDTH: 1024,
         WINDOW_HEIGHT: 760,
         WINDOW_FULLSCREEN: false,
+        DEBUG: true,
     };
 
     let mut app = App::new(config).await;
 
-    let entity = app.world.entities.create();
-    let component = Player::new();
-    app.world.add_component_to_entity(entity, component);
+    let component = Pixel::new();
+    for _ in 1..100 {
+        let entity = app.world.entities.create();
+        app.world.add_component_to_entity(entity, component);
+    }
 
     app.run().await;
 }

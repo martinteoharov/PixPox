@@ -17,6 +17,7 @@ pub struct AppConfig {
     pub WINDOW_WIDTH: u32,
     pub WINDOW_HEIGHT: u32,
     pub WINDOW_FULLSCREEN: bool,
+    pub DEBUG: bool
 }
 
 pub struct App {
@@ -58,7 +59,6 @@ impl App {
 
     pub async fn run(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
-            // why?
             self.world.run();
 
             if self.quit {

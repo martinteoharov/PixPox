@@ -228,4 +228,8 @@ impl Renderer {
 
         Ok(())
     }
+
+    pub fn set_debug_text(&mut self) {
+
+    }
 }

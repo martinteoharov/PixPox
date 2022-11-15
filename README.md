@@ -12,3 +12,7 @@ The game engine will feature all kinds of different materials and effects, like:
 - rust
 
 These materials will be able to interact with each other using cellular automaton rules. For a simple example - water flows and fire spreads, water puts out fire and fire burns wood, etc. 
+
+
+TODO:
+

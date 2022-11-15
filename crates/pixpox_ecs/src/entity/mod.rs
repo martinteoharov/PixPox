@@ -33,6 +33,7 @@ impl EntityManager {
 
     pub fn create(&mut self) -> Entity {
         let id: u32 = self.available_ids.remove().unwrap() as u32;
+        info!("New id: {}", id);
         self.living_entity_count += 1;
 
         info!(
