@@ -35,7 +35,7 @@ async fn run() {
     let mut app = App::new(config).await;
 
     let component = Pixel::new();
-    for _ in 1..100 {
+    for _ in 1..100000 {
         let entity = app.world.entities.create();
         app.world.add_component_to_entity(entity, component);
     }

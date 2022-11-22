@@ -73,13 +73,14 @@ impl World {
         entity: Entity,
         mut component: ComponentType,
     ) {
+        // TODO: use a hashmap for this shit
         // Search for any existing ComponentVecs that match the type of the component being added.
         for component_vec in self.component_vecs.iter_mut() {
             if let Some(component_vec) = component_vec
                 .as_any_mut()
-                .downcast_mut::<Vec<Option<ComponentType>>>()
+                .downcast_mut::<RefCell<Vec<Option<ComponentType>>>>()
             {
-                component_vec[entity.id as usize] = Some(component);
+                component_vec.borrow_mut()[entity.id as usize] = Some(component);
                 return;
             }
         }
