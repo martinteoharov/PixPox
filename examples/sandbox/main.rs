@@ -5,10 +5,12 @@ pub mod components;
 
 extern crate dotenv;
 
-use components::{Player, Pixel};
+use std::time::Instant;
+
+use components::{Pixel, Player};
 use dotenv::dotenv;
 
-use log::{error, info};
+use log::{error, info, debug};
 use pixpox::pixpox_app::App;
 use pixpox::pixpox_renderer::Renderer;
 use pixpox::pixpox_utils;
@@ -34,11 +36,19 @@ async fn run() {
 
     let mut app = App::new(config).await;
 
-    let component = Pixel::new();
-    for _ in 1..100000 {
-        let entity = app.world.entities.create();
-        app.world.add_component_to_entity(entity, component);
+    let pixel_component = Pixel::new();
+
+    let now = Instant::now();
+
+    for _ in 1..1_000_000 {
+        let entity = app.world.new_entity();
+        app.world.add_component_to_entity(entity, pixel_component);
     }
+
+    debug!(
+        "Main::run() create 1000000 entities in {} micros",
+        now.elapsed().as_micros().to_string()
+    );
 
     app.run().await;
 }

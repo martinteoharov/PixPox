@@ -8,7 +8,7 @@ use std::{
     time::{self, Duration, Instant},
 };
 
-use log::{info, debug};
+use log::{debug, info};
 
 use crate::{
     components::{self, BaseComponent},
@@ -55,7 +55,7 @@ impl World {
         let mut fps = Timer::apply(|delta_t, prev_tick| (delta_t, *prev_tick), 0)
             .every(time::Duration::from_secs(5))
             .start(time::Instant::now());
-        
+
         print_type_of(&fps);
 
         Self {
@@ -68,19 +68,42 @@ impl World {
         }
     }
 
+    pub fn new_entity(&mut self) -> Entity {
+        let now = Instant::now();
+        let entity = self.entities.create();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.push_none();
+        } 
+
+        debug!(
+            "World::new_entity(): {} micros",
+            now.elapsed().as_micros().to_string()
+        );
+
+        return entity;
+    }
+
     pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Copy>(
         &mut self,
         entity: Entity,
         mut component: ComponentType,
     ) {
+        let now = Instant::now();
         // TODO: use a hashmap for this shit
         // Search for any existing ComponentVecs that match the type of the component being added.
         for component_vec in self.component_vecs.iter_mut() {
             if let Some(component_vec) = component_vec
                 .as_any_mut()
-                .downcast_mut::<RefCell<Vec<Option<ComponentType>>>>()
+                .downcast_mut::<Vec<Option<ComponentType>>>()
             {
-                component_vec.borrow_mut()[entity.id as usize] = Some(component);
+                component_vec[entity.id as usize] = Some(component);
+
+                debug!(
+                    "World::add_component_to_entity() existing component_vec: {} micros",
+                    now.elapsed().as_micros().to_string()
+                );
+
                 return;
             }
         }
@@ -96,29 +119,15 @@ impl World {
 
         // Give this Entity the Component.
         new_component_vec[entity.id as usize] = Some(component);
-        self.component_vecs
-            .push(Box::new(RefCell::new(new_component_vec)));
+        self.component_vecs.push(Box::new(new_component_vec));
 
-        info!(
-            "World::add_component_to_entity() - Added component: {} to entity: {}",
+        debug!(
+            "World::add_component_to_entity() - Added component: {} to entity: {} in {} micros",
             component.label(),
-            entity.id
+            entity.id,
+            now.elapsed().as_micros().to_string()
         );
     }
-
-    // pub fn borrow_component_vec_mut<ComponentType: 'static + Label + Run>(
-    //     &self,
-    // ) -> Option<RefMut<Vec<Option<ComponentType>>>> {
-    //     for component_vec in self.component_vecs.iter() {
-    //         if let Some(component_vec) = component_vec
-    //             .as_any()
-    //             .downcast_ref::<RefCell<Vec<Option<ComponentType>>>>()
-    //         {
-    //             return Some(component_vec.borrow_mut());
-    //         }
-    //     }
-    //     None
-    // }
 
     pub fn run(&mut self) {
         let now = Instant::now();
@@ -127,7 +136,10 @@ impl World {
             component_vec.run_all();
         }
 
-        info!("Run all components: {} micros", now.elapsed().as_micros().to_string());
+        debug!(
+            "Run all components: {} micros",
+            now.elapsed().as_micros().to_string()
+        );
     }
 
     pub fn spawn_random_terrain() {}
@@ -142,7 +154,7 @@ pub trait ComponentVec {
     fn run_all(&mut self);
 }
 
-impl<T: 'static + Run> ComponentVec for RefCell<Vec<Option<T>>> {
+impl<T: 'static + Run> ComponentVec for Vec<Option<T>> {
     fn as_any(&self) -> &dyn std::any::Any {
         self as &dyn std::any::Any
     }
@@ -152,11 +164,11 @@ impl<T: 'static + Run> ComponentVec for RefCell<Vec<Option<T>>> {
     }
 
     fn push_none(&mut self) {
-        self.get_mut().push(None)
+        self.push(None)
     }
 
     fn run_all(&mut self) {
-        for component in self.borrow_mut().iter_mut() {
+        for component in self.iter_mut() {
             if let Some(c) = component {
                 c.run();
             }

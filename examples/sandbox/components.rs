@@ -33,19 +33,21 @@ impl Run for Player {
 #[derive(Copy, Clone)]
 pub struct Pixel {
     cords: Position,
+    label: &'static str 
 }
 
 impl Pixel {
     pub fn new() -> Self {
         Self {
             cords: Position::Logical(LogicalPosition { x: 10.0, y: 10.0 }),
+            label: "Pixel"
         }
     }
 }
 
 impl Label for Pixel {
     fn label(&mut self) -> &'static str {
-        return ""
+        return self.label
     }
 }
 
