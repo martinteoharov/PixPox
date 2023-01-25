@@ -8,7 +8,7 @@ use winit::{
 };
 
 use pixpox_ecs::World;
-use pixpox_renderer::Renderer;
+use pixpox_renderer::renderer::wgpu_renderer::Renderer;
 
 use log::{info, warn};
 
@@ -25,7 +25,7 @@ pub struct App {
     pub renderer: Renderer,
     pub event_loop: EventLoop<()>,
     pub window: Window,
-    quit: bool,
+    pub quit: bool,
 }
 
 impl App {
@@ -104,7 +104,6 @@ impl App {
                 },
 
                 Event::RedrawRequested(window_id) if window_id == self.window.id() => {
-                    self.renderer.update();
                     match self.renderer.render() {
                         Ok(_) => {},
                         // Reconfigure the surface if lost
