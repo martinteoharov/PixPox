@@ -1,6 +1,7 @@
+use pixpox_renderer::{Pixels, SurfaceTexture};
 use winit::{
-    dpi::{PhysicalSize, Size},
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    dpi::{LogicalSize},
+    event::{Event, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
     platform::run_return::EventLoopExtRunReturn,
     window::Window,
@@ -8,27 +9,30 @@ use winit::{
 };
 
 use pixpox_ecs::World;
-use pixpox_renderer::Renderer;
+use winit_input_helper::WinitInputHelper;
 
-use log::{info, warn};
+use log::{debug, info, warn};
 
 pub struct AppConfig {
     pub WINDOW_TITLE: &'static str,
     pub WINDOW_WIDTH: u32,
     pub WINDOW_HEIGHT: u32,
     pub WINDOW_FULLSCREEN: bool,
-    pub DEBUG: bool
+    pub DEBUG: bool,
 }
 
 pub struct App {
     pub world: World,
-    pub renderer: Renderer,
-    pub event_loop: EventLoop<()>,
-    pub window: Window,
+    pixels: Pixels,
+    event_loop: EventLoop<()>,
+    window: Window,
+    input: WinitInputHelper,
+    paused: bool,
     quit: bool,
 }
 
 impl App {
+    // Create a new application. Panics if renderer can not be initialized.
     pub async fn new(config: AppConfig) -> App {
         // Initialize WGPU logging
         env_logger::init();
@@ -37,93 +41,97 @@ impl App {
 
         // Define the event loop
         let event_loop = EventLoop::new();
-        let window = WindowBuilder::new()
-            .with_title(config.WINDOW_TITLE)
-            .with_inner_size(Size::Physical(PhysicalSize {
-                width: config.WINDOW_WIDTH,
-                height: config.WINDOW_HEIGHT,
-            }))
-            .build(&event_loop)
-            .unwrap();
+        let mut input = WinitInputHelper::new();
 
-        let renderer = Renderer::new(&window).await;
+        let window = {
+            let size = LogicalSize::new(config.WINDOW_WIDTH as f64, config.WINDOW_HEIGHT as f64);
+            let scaled_size = LogicalSize::new(
+                config.WINDOW_WIDTH as f64 * 3.0,
+                config.WINDOW_HEIGHT as f64 * 3.0,
+            );
+            WindowBuilder::new()
+                .with_title(config.WINDOW_TITLE)
+                .with_inner_size(scaled_size)
+                .with_min_inner_size(size)
+                .build(&event_loop)
+                .unwrap()
+        };
+
+        let mut pixels = {
+            let window_size = window.inner_size();
+            let surface_texture =
+                SurfaceTexture::new(window_size.width, window_size.height, &window);
+
+            match Pixels::new(config.WINDOW_WIDTH, config.WINDOW_HEIGHT, surface_texture) {
+                Ok(v) => v,
+                Err(e) => {
+                    println!("Could not initialize renderer");
+                    panic!()
+                },
+            }
+        };
 
         Self {
             world,
-            renderer,
+            pixels,
+            input,
             event_loop,
             window,
+            paused: false,
             quit: false,
         }
     }
 
     pub async fn run(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
-            self.world.run();
-
-            if self.quit {
-                *control_flow = ControlFlow::Exit;
+            // The one and only event that winit_input_helper doesn't have for us...
+            if let Event::RedrawRequested(_) = event {
+                println!("redraw")
             }
 
-            match event {
-                Event::WindowEvent {
-                    ref event,
-                    window_id,
-                } if window_id == self.window.id() => {
-                    if !self.renderer.input(event) {
-                        match event {
-                            WindowEvent::CloseRequested
-                            | WindowEvent::KeyboardInput {
-                                input:
-                                    KeyboardInput {
-                                        state: ElementState::Pressed,
-                                        virtual_keycode: Some(VirtualKeyCode::Escape),
-                                        ..
-                                    }
-                                    | KeyboardInput {
-                                        state: ElementState::Pressed,
-                                        virtual_keycode: Some(VirtualKeyCode::Q),
-                                        ..
-                                    },
-                                ..
-                            } => {
-                                *control_flow = ControlFlow::Exit;
-                            },
+            // For everything else, for let winit_input_helper collect events to build its state.
+            // It returns `true` when it is time to update our game state and request a redraw.
+            if self.input.update(&event) {
+                // Close events
+                if self.input.key_pressed(VirtualKeyCode::Escape) || self.input.quit() {
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+                if self.input.key_pressed(VirtualKeyCode::P) {
+                    self.paused = !self.paused;
+                }
+                if self.input.key_pressed_os(VirtualKeyCode::Space) {
+                    // Space is frame-step, so ensure we're paused
+                    self.paused = true;
+                }
+                // Handle mouse. This is a bit involved since support some simple
+                // line drawing (mostly because it makes nice looking patterns).
+                let (mouse_cell, mouse_prev_cell) = self
+                    .input
+                    .mouse()
+                    .map(|(mx, my)| {
+                        let (dx, dy) = self.input.mouse_diff();
+                        let prev_x = mx - dx;
+                        let prev_y = my - dy;
 
-                            WindowEvent::Resized(physical_size) => {
-                                self.renderer.resize(*physical_size);
-                            },
+                        let (mx_i, my_i) = self
+                            .pixels
+                            .window_pos_to_pixel((mx, my))
+                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
 
-                            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                                self.renderer.resize(**new_inner_size);
-                            },
+                        let (px_i, py_i) = self
+                            .pixels
+                            .window_pos_to_pixel((prev_x, prev_y))
+                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
 
-                            _ => {},
-                        }
-                    }
-                },
+                        (
+                            (mx_i as isize, my_i as isize),
+                            (px_i as isize, py_i as isize),
+                        )
+                    })
+                    .unwrap_or_default();
 
-                Event::RedrawRequested(window_id) if window_id == self.window.id() => {
-                    self.renderer.update();
-                    match self.renderer.render() {
-                        Ok(_) => {},
-                        // Reconfigure the surface if lost
-                        Err(wgpu::SurfaceError::Lost) => {
-                            self.renderer.resize(self.renderer.size.clone())
-                        },
-                        // The system is out of memory, we should probably quit
-                        Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                        // All other errors (Outdated, Timeout) should be resolved by the next frame
-                        Err(e) => eprintln!("{:?}", e),
-                    }
-                },
-
-                Event::MainEventsCleared => {
-                    // RedrawRequested will only trigger once, unless we manually
-                    // request it.
-                    self.window.request_redraw();
-                },
-                _ => {},
+                self.window.request_redraw();
             }
         });
     }

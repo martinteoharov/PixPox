@@ -12,7 +12,6 @@ use dotenv::dotenv;
 
 use log::{error, info, debug};
 use pixpox::pixpox_app::App;
-use pixpox::pixpox_renderer::Renderer;
 use pixpox::pixpox_utils;
 use pixpox_app::AppConfig;
 use pixpox_ecs::entity::Entity;
@@ -25,6 +24,7 @@ fn main() {
 }
 
 async fn run() {
+
     // TODO: read config from file
     let config = AppConfig {
         WINDOW_TITLE: "pixpox!",
@@ -40,13 +40,16 @@ async fn run() {
 
     let now = Instant::now();
 
-    for _ in 1..1_000_000 {
+    let entities_count = 100;
+
+    for _ in 1..entities_count {
         let entity = app.world.new_entity();
         app.world.add_component_to_entity(entity, pixel_component);
     }
 
     debug!(
-        "Main::run() create 1000000 entities in {} micros",
+        "Main::run() create {} entities in {} micros",
+        entities_count,
         now.elapsed().as_micros().to_string()
     );
 
