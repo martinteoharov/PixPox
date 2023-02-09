@@ -31,13 +31,6 @@ impl EntityManager {
         self.id_counter += 1;
         self.living_entity_count += 1;
 
-
-        debug!(
-            "EntityManager::create() time to calculate id: {}",
-            now.elapsed().as_micros().to_string()
-        );
-
-        debug!("New id: {}", id);
         debug!(
             "EntityManager::create() - id: {}, living_entity_count: {}, in {} micros",
             id, self.living_entity_count,

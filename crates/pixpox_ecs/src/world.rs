@@ -1,17 +1,20 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+use core::panic;
 use std::{
     any::{self, Any},
+    borrow::BorrowMut,
     cell::{RefCell, RefMut},
+    collections::HashMap,
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
     time::{self, Duration, Instant},
 };
 
-use log::{debug, info};
+use log::{debug, error, info};
 
 use crate::{
-    components::{self, BaseComponent},
+    components::{self, BaseComponent, TexturePixel},
     entity::{Entity, EntityManager},
     Label, Run,
 };
@@ -38,15 +41,22 @@ fn print_type_of<T>(_: &T) {
     println!("{}", std::any::type_name::<T>())
 }
 
-pub struct World {
+pub enum BucketAction {
+    GET,
+    PUT,
+}
+
+// TODO: Add a field for tick speed
+pub struct World<'a> {
     id: WorldId,
     pub entities: EntityManager,
     pub component_vecs: Vec<Box<dyn ComponentVec>>,
+    pub storage: HashMap<&'a str, Box<dyn Any>>,
     pub change_tick: time::Instant,
     pub last_change_tick: time::Instant,
 }
 
-impl World {
+impl World<'static> {
     pub fn new() -> Self {
         let entities = EntityManager::new();
         let component_vecs = Vec::new();
@@ -65,23 +75,12 @@ impl World {
             component_vecs,
             change_tick: time::Instant::now(),
             last_change_tick: time::Instant::now(),
+            storage: HashMap::new(),
         }
     }
 
-    pub fn new_entity(&mut self) -> Entity {
-        let now = Instant::now();
-        let entity = self.entities.create();
-
-        for component_vec in self.component_vecs.iter_mut() {
-            component_vec.push_none();
-        } 
-
-        debug!(
-            "World::new_entity(): {} micros",
-            now.elapsed().as_micros().to_string()
-        );
-
-        return entity;
+    pub fn spawn(&mut self) -> Entity {
+        self.new_entity()
     }
 
     pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Copy>(
@@ -129,6 +128,66 @@ impl World {
         );
     }
 
+    pub fn query_components_for_render<T: 'static>(&mut self) -> Option<Vec<&T>> {
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec.as_any_mut().downcast_mut::<Vec<Option<T>>>()
+            {
+                debug!(
+                    "World::query_entities_for_render() in {}",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                let res = component_vec
+                    .iter()
+                    .filter_map(|x| x.as_ref())
+                    .collect::<Vec<&T>>();
+
+                return Some(res);
+            }
+        }
+
+        return None;
+    }
+
+    pub fn query_storage<T: 'static>(&mut self, label: &str) -> Option<&mut Box<T>> {
+        assert!(
+            self.storage.contains_key(label),
+            "World::query_storage() didn't find an item you were looking for."
+        );
+
+        match self.storage.get_mut(label) {
+            Some(data) => data.downcast_mut::<Box<T>>(),
+            None => None,
+        }
+    }
+
+    pub fn query_bucket<T: 'static>(
+        &mut self,
+        label: &str,
+        action: BucketAction,
+        index: Option<u64>,
+    ) {
+    }
+
+    pub fn new_hashmap_bucket<K: 'static, V: 'static>(
+        &mut self,
+        label: &'static str,
+        default: Option<HashMap<K, V>>,
+    ) {
+        let datastorage = Box::new(HashMap::<K, V>::new());
+
+        match default {
+            Some(map) => {
+                self.storage.insert(label, Box::new(map));
+            },
+            None => {
+                self.storage.insert(label, datastorage);
+            },
+        }
+    }
+
     pub fn run(&mut self) {
         let now = Instant::now();
 
@@ -142,9 +201,25 @@ impl World {
         );
     }
 
-    pub fn spawn_random_terrain() {}
+    fn new_entity(&mut self) -> Entity {
+        let entity = self.entities.create();
+        let now = Instant::now();
 
-    pub fn serialize() {}
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.push_none();
+        }
+
+        debug!(
+            "World::new_entity(): {} micros",
+            now.elapsed().as_micros().to_string()
+        );
+
+        return entity;
+    }
+
+    fn spawn_random_terrain() {}
+
+    fn serialize() {}
 }
 
 pub trait ComponentVec {

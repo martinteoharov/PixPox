@@ -1,6 +1,6 @@
 use pixpox_renderer::{Pixels, SurfaceTexture};
 use winit::{
-    dpi::{LogicalSize},
+    dpi::{LogicalPosition, LogicalSize},
     event::{Event, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
     platform::run_return::EventLoopExtRunReturn,
@@ -8,11 +8,12 @@ use winit::{
     window::WindowBuilder,
 };
 
-use pixpox_ecs::World;
+use pixpox_ecs::{TexturePixel, World};
 use winit_input_helper::WinitInputHelper;
 
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 
+#[derive(Copy, Clone)]
 pub struct AppConfig {
     pub WINDOW_TITLE: &'static str,
     pub WINDOW_WIDTH: u32,
@@ -22,7 +23,7 @@ pub struct AppConfig {
 }
 
 pub struct App {
-    pub world: World,
+    pub world: World<'static>,
     pixels: Pixels,
     event_loop: EventLoop<()>,
     window: Window,
@@ -84,9 +85,25 @@ impl App {
 
     pub async fn run(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
+            self.world.run();
+
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
-                println!("redraw")
+                if let Err(err) = self.pixels.render() {
+                    error!("pixels.render() failed: {}", err);
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+
+                let pixels = self.pixels.get_frame_mut();
+                let cells = self
+                    .world
+                    .query_components_for_render::<TexturePixel>()
+                    .unwrap();
+
+                for (c, pix) in cells.iter().zip(pixels.chunks_exact_mut(4)) {
+                    pix.copy_from_slice(&c.color);
+                }
             }
 
             // For everything else, for let winit_input_helper collect events to build its state.
@@ -130,6 +147,15 @@ impl App {
                         )
                     })
                     .unwrap_or_default();
+
+                // Resize the window
+                if let Some(size) = self.input.window_resized() {
+                    if let Err(err) = self.pixels.resize_surface(size.width, size.height) {
+                        error!("pixels.resize_surface() failed: {err}");
+                        *control_flow = ControlFlow::Exit;
+                        return;
+                    }
+                }
 
                 self.window.request_redraw();
             }

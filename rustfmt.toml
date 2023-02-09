@@ -1,1 +1,2 @@
 match_block_trailing_comma = true
+attr_fn_like_width=100

@@ -1,7 +1,7 @@
 pub mod entity;
 
-mod world;
-mod components;
+pub mod world;
+pub mod components;
 
-pub use world::World;
-pub use components::{Label, Run};
+pub use world::*;
+pub use components::*;
