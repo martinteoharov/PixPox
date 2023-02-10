@@ -1,4 +1,4 @@
-use pixpox_renderer::{Pixels, SurfaceTexture};
+use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, VirtualKeyCode},
@@ -8,7 +8,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use pixpox_ecs::{TexturePixel, World};
+use pixpox_ecs::{components::Texture as RenderTexture, World};
 use winit_input_helper::WinitInputHelper;
 
 use log::{debug, error, info, warn};
@@ -23,7 +23,7 @@ pub struct AppConfig {
 }
 
 pub struct App {
-    pub world: World<'static>,
+    pub world: World,
     pixels: Pixels,
     event_loop: EventLoop<()>,
     window: Window,
@@ -83,7 +83,7 @@ impl App {
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run<T: 'static + RenderTexture>(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
             self.world.run();
 
@@ -96,13 +96,8 @@ impl App {
                 }
 
                 let pixels = self.pixels.get_frame_mut();
-                let cells = self
-                    .world
-                    .query_components_for_render::<TexturePixel>()
-                    .unwrap();
-
-                for (c, pix) in cells.iter().zip(pixels.chunks_exact_mut(4)) {
-                    pix.copy_from_slice(&c.color);
+                if let Some(pixelmap) = self.world.storage.query_storage::<T>("pixelmap") {
+                    pixelmap.render(pixels);
                 }
             }
 

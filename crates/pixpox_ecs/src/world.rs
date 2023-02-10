@@ -14,9 +14,9 @@ use std::{
 use log::{debug, error, info};
 
 use crate::{
-    components::{self, BaseComponent, TexturePixel},
+    components::{self, BaseComponent},
     entity::{Entity, EntityManager},
-    Label, Run,
+    Label, Run, Storage, Texture
 };
 
 use ticktock::{Clock, Timer};
@@ -47,16 +47,16 @@ pub enum BucketAction {
 }
 
 // TODO: Add a field for tick speed
-pub struct World<'a> {
+pub struct World {
     id: WorldId,
     pub entities: EntityManager,
     pub component_vecs: Vec<Box<dyn ComponentVec>>,
-    pub storage: HashMap<&'a str, Box<dyn Any>>,
+    pub storage: Storage,
     pub change_tick: time::Instant,
     pub last_change_tick: time::Instant,
 }
 
-impl World<'static> {
+impl World {
     pub fn new() -> Self {
         let entities = EntityManager::new();
         let component_vecs = Vec::new();
@@ -75,7 +75,7 @@ impl World<'static> {
             component_vecs,
             change_tick: time::Instant::now(),
             last_change_tick: time::Instant::now(),
-            storage: HashMap::new(),
+            storage: Storage::new(),
         }
     }
 
@@ -128,7 +128,7 @@ impl World<'static> {
         );
     }
 
-    pub fn query_components_for_render<T: 'static>(&mut self) -> Option<Vec<&T>> {
+    pub fn query_components_for_render<T: 'static + Texture>(&mut self) -> Option<Vec<&T>> {
         let now = Instant::now();
 
         for component_vec in self.component_vecs.iter_mut() {
@@ -140,7 +140,7 @@ impl World<'static> {
                 );
 
                 let res = component_vec
-                    .iter()
+                    .iter_mut()
                     .filter_map(|x| x.as_ref())
                     .collect::<Vec<&T>>();
 
@@ -151,48 +151,11 @@ impl World<'static> {
         return None;
     }
 
-    pub fn query_storage<T: 'static>(&mut self, label: &str) -> Option<&mut Box<T>> {
-        assert!(
-            self.storage.contains_key(label),
-            "World::query_storage() didn't find an item you were looking for."
-        );
-
-        match self.storage.get_mut(label) {
-            Some(data) => data.downcast_mut::<Box<T>>(),
-            None => None,
-        }
-    }
-
-    pub fn query_bucket<T: 'static>(
-        &mut self,
-        label: &str,
-        action: BucketAction,
-        index: Option<u64>,
-    ) {
-    }
-
-    pub fn new_hashmap_bucket<K: 'static, V: 'static>(
-        &mut self,
-        label: &'static str,
-        default: Option<HashMap<K, V>>,
-    ) {
-        let datastorage = Box::new(HashMap::<K, V>::new());
-
-        match default {
-            Some(map) => {
-                self.storage.insert(label, Box::new(map));
-            },
-            None => {
-                self.storage.insert(label, datastorage);
-            },
-        }
-    }
-
     pub fn run(&mut self) {
         let now = Instant::now();
 
         for component_vec in self.component_vecs.iter_mut() {
-            component_vec.run_all();
+            component_vec.run_all(&mut self.storage);
         }
 
         debug!(
@@ -226,7 +189,7 @@ pub trait ComponentVec {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn push_none(&mut self);
-    fn run_all(&mut self);
+    fn run_all(&mut self, storage: &mut Storage);
 }
 
 impl<T: 'static + Run> ComponentVec for Vec<Option<T>> {
@@ -242,10 +205,10 @@ impl<T: 'static + Run> ComponentVec for Vec<Option<T>> {
         self.push(None)
     }
 
-    fn run_all(&mut self) {
+    fn run_all(&mut self, storage: &mut Storage) {
         for component in self.iter_mut() {
             if let Some(c) = component {
-                c.run();
+                c.run(storage);
             }
         }
     }

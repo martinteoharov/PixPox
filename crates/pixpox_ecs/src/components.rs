@@ -1,5 +1,7 @@
-use log::{info, debug};
+use log::{debug, info};
 use winit::dpi::LogicalPosition;
+
+use crate::Storage;
 
 /*
  * Base traits that all components must implement
@@ -9,7 +11,7 @@ pub trait Label {
 }
 
 pub trait Run {
-    fn run(&mut self);
+    fn run(&mut self, storage: &mut Storage);
 }
 
 pub struct BaseComponent {
@@ -25,39 +27,15 @@ impl Label for BaseComponent {
 }
 
 impl Run for BaseComponent {
-    fn run(&mut self) {
+    fn run(&mut self, storage: &mut Storage) {
         info!("Kur kapan");
     }
 }
 
-// Texture
-#[derive(Copy, Clone)]
-pub struct TexturePixel {
-    pub pos: LogicalPosition<u32>,
-    pub color: [u8; 4],
-    label: &'static str,
-}
+/*
+ * Base trait that all Texture components need to implement
+*/
 
-impl TexturePixel {
-    pub fn new(pos: LogicalPosition<u32>, color: [u8; 4]) -> Self {
-
-        Self {
-            pos,
-            color,
-            label: "TexturePixel",
-        }
-    }
-}
-
-impl Label for TexturePixel {
-    fn label(&mut self) -> &'static str {
-        return self.label;
-    }
-}
-
-impl Run for TexturePixel {
-    fn run(&mut self) {
-        debug!("Running component {}", self.label);
-        // self.alive = false;
-    }
+pub trait Texture {
+    fn render(&mut self, pixels: &mut [u8]);
 }

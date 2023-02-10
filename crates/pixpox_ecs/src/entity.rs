@@ -7,7 +7,7 @@ use log::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Entity {
-    pub(crate) id: usize,
+    pub id: usize,
 }
 
 pub struct EntityManager {
