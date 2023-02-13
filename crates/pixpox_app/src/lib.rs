@@ -91,12 +91,6 @@ impl App {
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
-                if let Err(err) = self.pixels.render() {
-                    error!("pixels.render() failed: {}", err);
-                    *control_flow = ControlFlow::Exit;
-                    return;
-                }
-
                 // Run components
                 self.world.run();
 
@@ -112,6 +106,12 @@ impl App {
 
                 // Render Global Pixelmap to frame
                 pixelmap.render(pixels);
+
+                if let Err(err) = self.pixels.render() {
+                    error!("pixels.render() failed: {}", err);
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
             }
 
             // For everything else, for let winit_input_helper collect events to build its state.

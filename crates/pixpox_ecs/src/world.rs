@@ -186,14 +186,19 @@ impl World {
             component_vec.run_all(&mut self.storage);
         }
 
+        info!(
+            "Run all components: {} seconds",
+            now.elapsed().as_secs_f32().to_string()
+        );
+        let now_update = Instant::now();
+
         for component_vec in self.component_vecs.iter_mut() {
             component_vec.update_all(&mut self.storage);
         }
 
         info!(
-            "Run all components: {} micros, {} seconds",
-            now.elapsed().as_micros().to_string(),
-            now.elapsed().as_secs_f32().to_string()
+            "Update all components: {} seconds",
+            now_update.elapsed().as_secs_f32().to_string()
         );
     }
 

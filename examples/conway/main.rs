@@ -99,8 +99,8 @@ impl GlobalPixelMap {
     pub fn new_empty(width: u32, height: u32, clear_color: [u8; 4]) -> Self {
         let mut pixelmap: Vec<[u8; 4]> = Vec::new();
 
-        for y in 0..height {
-            for x in 0..width {
+        for _y in 0..height {
+            for _x in 0..width {
                 let c: [u8; 4] = [0, 0, 0, 0];
                 pixelmap.push(c);
             }
@@ -115,8 +115,8 @@ impl GlobalPixelMap {
     }
 
     pub fn clear(&mut self) {
-        for y in 0..self.height {
-            for x in 0..self.width {
+        for _y in 0..self.height {
+            for _x in 0..self.width {
                 //   let pixel = self.pixelmap.get_mut(&LogicalPosition::new(x, y)).unwrap();
                 //   let color: [u8; 4] = [0, 0, 0, 255];
                 //   pixel.copy_from_slice(&color);

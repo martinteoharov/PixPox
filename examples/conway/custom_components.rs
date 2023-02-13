@@ -1,8 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::atomic::AtomicUsize};
+use std::collections::HashMap;
 
-use lazy_static::lazy_static;
-use log::{debug, error, info};
-
+use log::debug;
 use pixpox_app::App;
 use pixpox_ecs::{
     entity::{self, Entity},
@@ -72,30 +70,14 @@ impl Label for Cell {
 
 impl Run for Cell {
     fn run(&mut self, storage: &mut Storage) {
-        // debug!("Running component {}", self.label);
-        // self.alive = false;
         let neibs = self.count_neibs(storage);
+
         if self.state == true {
             self.state = neibs == 2 || neibs == 3;
         } else {
             self.state = neibs == 3;
         }
 
-        if true {
-            {
-                let pixelmap = storage
-                    .query_storage::<GlobalPixelMap>("pixelmap")
-                    .expect("Could not query Pixel Map");
-
-                debug!("State has changed between frames - should draw");
-                pixelmap.draw_pos(self.pos, self.color);
-            }
-        }
-    }
-}
-
-impl Update for Cell {
-    fn update(&mut self, storage: &mut Storage) {
         self.heat = if self.state == true {
             255
         } else if self.heat > 10 {
@@ -104,6 +86,7 @@ impl Update for Cell {
             0
         };
 
+        let old_color = self.color;
         // Update cell color
         self.color = if self.state == true {
             [255, 0, 0, 255]
@@ -111,12 +94,24 @@ impl Update for Cell {
             [self.heat, 0, 0, 50]
         };
 
+        if old_color != self.color {
+            let pixelmap = storage
+                .query_storage::<GlobalPixelMap>("pixelmap")
+                .expect("Could not query Pixel Map");
+
+            pixelmap.draw_pos(self.pos, self.color);
+        }
+    }
+}
+
+impl Update for Cell {
+    fn update(&mut self, storage: &mut Storage) {
         // Fetch & Update cell in grid
         let grid = storage
             .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
             .expect("Could not get grid");
 
-        let mut grid_pixel = grid.get_mut(&self.pos).expect("Could not get grid_pixel");
+        let grid_pixel = grid.get_mut(&self.pos).expect("Could not get grid_pixel");
         debug!("state: {}, next_state: {}", grid_pixel, self.state);
         *grid_pixel = self.state;
     }
