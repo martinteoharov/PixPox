@@ -14,9 +14,9 @@ use std::{
 use log::{debug, error, info};
 
 use crate::{
-    components::{self, BaseComponent},
+    component::{self},
     entity::{Entity, EntityManager},
-    Label, Run, Storage, Texture
+    Label, Run, Storage, Texture, Update,
 };
 
 use ticktock::{Clock, Timer};
@@ -83,7 +83,7 @@ impl World {
         self.new_entity()
     }
 
-    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Copy>(
+    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Update + Clone>(
         &mut self,
         entity: Entity,
         mut component: ComponentType,
@@ -116,16 +116,44 @@ impl World {
             new_component_vec.push(None);
         }
 
+        let label = component.label();
         // Give this Entity the Component.
         new_component_vec[entity.id as usize] = Some(component);
         self.component_vecs.push(Box::new(new_component_vec));
 
         debug!(
             "World::add_component_to_entity() - Added component: {} to entity: {} in {} micros",
-            component.label(),
+            label,
             entity.id,
             now.elapsed().as_micros().to_string()
         );
+    }
+
+    pub fn query_components<T: 'static>(&mut self, entities: Vec<&Entity>) -> Option<Vec<&T>> {
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec.as_any_mut().downcast_mut::<Vec<Option<T>>>()
+            {
+                debug!(
+                    "World::query_components() in {}",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                let res = entities
+                    .iter()
+                    .filter_map(|entity| {
+                        component_vec
+                            .get(entity.id)
+                            .expect("Entity could not be found in vec").as_ref()
+                    })
+                    .collect::<Vec<&T>>();
+
+                return Some(res);
+            }
+        }
+
+        return None;
     }
 
     pub fn query_components_for_render<T: 'static + Texture>(&mut self) -> Option<Vec<&T>> {
@@ -158,9 +186,14 @@ impl World {
             component_vec.run_all(&mut self.storage);
         }
 
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.update_all(&mut self.storage);
+        }
+
         debug!(
-            "Run all components: {} micros",
-            now.elapsed().as_micros().to_string()
+            "Run all components: {} micros, {} seconds",
+            now.elapsed().as_micros().to_string(),
+            now.elapsed().as_secs_f32().to_string()
         );
     }
 
@@ -190,9 +223,10 @@ pub trait ComponentVec {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn push_none(&mut self);
     fn run_all(&mut self, storage: &mut Storage);
+    fn update_all(&mut self, storage: &mut Storage);
 }
 
-impl<T: 'static + Run> ComponentVec for Vec<Option<T>> {
+impl<T: 'static + Run + Update> ComponentVec for Vec<Option<T>> {
     fn as_any(&self) -> &dyn std::any::Any {
         self as &dyn std::any::Any
     }
@@ -209,6 +243,14 @@ impl<T: 'static + Run> ComponentVec for Vec<Option<T>> {
         for component in self.iter_mut() {
             if let Some(c) = component {
                 c.run(storage);
+            }
+        }
+    }
+
+    fn update_all(&mut self, storage: &mut Storage) {
+        for component in self.iter_mut() {
+            if let Some(c) = component {
+                c.update(storage);
             }
         }
     }

@@ -1,9 +1,9 @@
 pub mod entity;
 
 pub mod world;
-pub mod components;
+pub mod component;
 pub mod storage;
 
 pub use world::*;
-pub use components::*;
+pub use component::*;
 pub use storage::*;

@@ -1110,11 +1110,13 @@ checksum = "478c572c3d73181ff3c2539045f6eb99e5491218eae919370993b890cdbdd98e"
 name = "pixpox"
 version = "0.1.0"
 dependencies = [
+ "arrayref",
  "bytemuck",
  "byteorder",
  "dotenv",
  "env_logger",
  "getrandom",
+ "lazy_static",
  "line_drawing",
  "log",
  "pixpox_app",

@@ -1,13 +1,15 @@
-use std::{any::Any, borrow::BorrowMut, cell::RefCell, collections::HashMap};
+use std::{any::Any, borrow::BorrowMut, cell::RefCell, collections::HashMap, fmt::Debug};
 
-use log::info;
+use log::{debug, info};
+
+use crate::Texture;
 
 pub enum BucketAction {
     GET,
     PUT,
 }
 pub struct Storage {
-    pub buckets: HashMap<&'static str, RefCell<Box<dyn Any>>>,
+    pub buckets: HashMap<&'static str, Box<dyn Any>>,
 }
 
 impl Storage {
@@ -17,20 +19,40 @@ impl Storage {
         }
     }
 
-    pub fn query_storage<T: 'static>(&mut self, label: &str) -> Option<&mut Box<T>> {
+    pub fn query_storage<T: 'static>(&mut self, label: &str) -> Option<&mut T> {
         assert!(
             self.buckets.contains_key(label),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        match self.buckets.get_mut(label) {
-            Some(data) => { 
-                let mut kur = data.borrow_mut();
-                kur.borrow().downcast_mut::<Box<T>>()
-            },
-            None => None,
+        if let Some(data) = self.buckets.get_mut(label) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
         }
+
+        None
     }
+
+    pub fn query_global_pixel_map<T: 'static + Texture>(&mut self, label: &str) -> Option<&mut T> {
+        assert!(
+            self.buckets.contains_key(label),
+            "World::query_storage() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(label) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
 
     pub fn query_bucket<T: 'static>(
         &mut self,
@@ -45,11 +67,11 @@ impl Storage {
         label: &'static str,
         default: Option<HashMap<K, V>>,
     ) {
-        let datastorage = RefCell::new(Box::new(HashMap::<K, V>::new()));
+        let datastorage = Box::new(HashMap::<K, V>::new());
 
         match default {
             Some(map) => {
-                self.buckets.insert(label, RefCell::new(Box::new(map)));
+                self.buckets.insert(label, Box::new(map));
             },
             None => {
                 self.buckets.insert(label, datastorage);
@@ -58,6 +80,6 @@ impl Storage {
     }
 
     pub fn new_bucket<T: 'static>(&mut self, label: &'static str, data: T) {
-        self.buckets.insert(label, RefCell::new(Box::new(data)));
+        self.buckets.insert(label, Box::new(data));
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
@@ -8,7 +10,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use pixpox_ecs::{components::Texture as RenderTexture, World};
+use pixpox_ecs::{component::Texture as RenderTexture, World};
 use winit_input_helper::WinitInputHelper;
 
 use log::{debug, error, info, warn};
@@ -85,7 +87,7 @@ impl App {
 
     pub async fn run<T: 'static + RenderTexture>(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
-            self.world.run();
+            debug!("Event loop");
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
@@ -95,9 +97,16 @@ impl App {
                     return;
                 }
 
+                self.world.run();
                 let pixels = self.pixels.get_frame_mut();
-                if let Some(pixelmap) = self.world.storage.query_storage::<T>("pixelmap") {
-                    pixelmap.render(pixels);
+
+                match self.world.storage.query_global_pixel_map::<T>("pixelmap") {
+                    Some(pixelmap) => {
+                        pixelmap.render(pixels);
+                    },
+                    None => {
+                        debug!("COULDN'T GET THE GLOBAL PIXEL MAP FUUUCK");
+                    },
                 }
             }
 
@@ -145,6 +154,7 @@ impl App {
 
                 // Resize the window
                 if let Some(size) = self.input.window_resized() {
+                    info!("Resize detected");
                     if let Err(err) = self.pixels.resize_surface(size.width, size.height) {
                         error!("pixels.resize_surface() failed: {err}");
                         *control_flow = ControlFlow::Exit;

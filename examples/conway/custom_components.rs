@@ -1,9 +1,13 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::atomic::AtomicUsize};
 
-use log::{debug, info};
+use lazy_static::lazy_static;
+use log::{debug, error, info};
 
 use pixpox_app::App;
-use pixpox_ecs::{entity::Entity, Label, Run, Storage, Texture, World};
+use pixpox_ecs::{
+    entity::{self, Entity},
+    Label, Run, Storage, Texture, Update, World,
+};
 use winit::dpi::{LogicalPosition, Position};
 
 use crate::GlobalPixelMap;
@@ -16,26 +20,47 @@ pub struct Cell {
 
     pos: LogicalPosition<u32>,
     color: [u8; 4],
-    alive: bool,
+    state: bool,
     heat: u8,
 }
 
 impl Cell {
     pub fn new(entity_id: usize, pos: LogicalPosition<u32>, alive: bool) -> Self {
-        let color: [u8; 4] = if alive {
+        let color = if alive == true {
             [0, 255, 255, 255]
         } else {
             [0, 0, 0, 255]
         };
 
         Self {
-            entity_id,
-            pos,
-            alive,
+            entity_id: entity_id,
+            pos: pos,
+            state: alive,
             heat: 0,
             label: "Cell",
-            color,
+            color: color,
         }
+    }
+
+    fn count_neibs(&mut self, storage: &mut Storage) -> u8 {
+        let grid = storage
+            .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
+            .expect("Could not query grid");
+
+        let (x, y) = (self.pos.x, self.pos.y);
+
+        if x == 0 || y == 0 || x >= 399 || y >= 299 {
+            return 0;
+        }
+
+        *grid.get(&LogicalPosition::new(x, y - 1)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x, y + 1)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x + 1, y - 1)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x + 1, y)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x + 1, y + 1)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x - 1, y - 1)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x - 1, y)).unwrap() as u8
+            + *grid.get(&LogicalPosition::new(x - 1, y + 1)).unwrap() as u8
     }
 }
 
@@ -49,10 +74,52 @@ impl Run for Cell {
     fn run(&mut self, storage: &mut Storage) {
         // debug!("Running component {}", self.label);
         // self.alive = false;
-        
-        if let Some(pixelmap) = storage.query_storage::<GlobalPixelMap>("pixelmap") {
-            pixelmap.set_pos(self.pos, self.color);
+
+        let neibs = self.count_neibs(storage);
+        if self.state == true {
+            self.state = neibs == 2 || neibs == 3;
+        } else {
+            self.state = neibs == 3;
         }
+
+        // let should_draw = self.next_state != self.state;
+        if true {
+            {
+                let pixelmap = storage
+                    .query_storage::<GlobalPixelMap>("pixelmap")
+                    .expect("Could not query Pixel Map");
+
+                debug!("State has changed between frames - should draw");
+                pixelmap.draw_pos(self.pos, self.color);
+            }
+        }
+    }
+}
+
+impl Update for Cell {
+    fn update(&mut self, storage: &mut Storage) {
+
+        self.heat = if self.state == true {
+            255
+        } else {
+            (self.heat - 1) % 255
+        };
+
+        // Update cell color
+        self.color = if self.state == true {
+            [0, 255, 255, 255]
+        } else {
+            [0, 0, self.heat, 255]
+        };
+
+        // Fetch & Update cell in grid
+        let grid = storage
+            .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
+            .expect("Could not get grid");
+
+        let mut grid_pixel = grid.get_mut(&self.pos).expect("Could not get grid_pixel");
+        debug!("state: {}, next_state: {}", grid_pixel, self.state);
+        *grid_pixel = self.state;
     }
 }
 
