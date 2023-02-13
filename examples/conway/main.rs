@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
-use string_interner::StringInterner;
+use interner::global::{GlobalString, GlobalPool};
+
 
 extern crate arrayref;
 
@@ -36,8 +37,6 @@ fn main() {
 
 async fn run() {
     // TODO: read config from file
-    let mut interner = StringInterner::default();
-
     let config = AppConfig {
         WINDOW_TITLE: "Conway",
         WINDOW_WIDTH: 400,
@@ -76,11 +75,11 @@ async fn run() {
 
     app.world
         .storage
-        .new_bucket::<GlobalPixelMap>(interner.get_or_intern("pixelmap"), global_pixel_map);
+        .new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
 
     app.world
         .storage
-        .new_bucket::<HashMap<LogicalPosition<u32>, bool>>(interner.get_or_intern("grid"), grid);
+        .new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
 
     info!(
         "Main::run() create {} entities in {} seconds",
@@ -121,9 +120,9 @@ impl GlobalPixelMap {
     pub fn clear(&mut self) {
         for y in 0..self.height {
             for x in 0..self.width {
-             //   let pixel = self.pixelmap.get_mut(&LogicalPosition::new(x, y)).unwrap();
-             //   let color: [u8; 4] = [0, 0, 0, 255];
-             //   pixel.copy_from_slice(&color);
+                //   let pixel = self.pixelmap.get_mut(&LogicalPosition::new(x, y)).unwrap();
+                //   let color: [u8; 4] = [0, 0, 0, 255];
+                //   pixel.copy_from_slice(&color);
             }
         }
     }

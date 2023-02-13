@@ -32,4 +32,4 @@ pixpox_renderer = { path = "crates/pixpox_renderer" }
 pixpox_utils = { path = "crates/pixpox_utils" }
 arrayref = "0.3.6"
 lazy_static = "1.4.0"
-string-interner = "0.14.0"
+interner = "0.1.1"

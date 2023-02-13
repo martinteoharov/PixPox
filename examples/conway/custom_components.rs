@@ -1,5 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::atomic::AtomicUsize};
 
+use interner::global::GlobalPool;
 use lazy_static::lazy_static;
 use log::{debug, error, info};
 
@@ -74,7 +75,6 @@ impl Run for Cell {
     fn run(&mut self, storage: &mut Storage) {
         // debug!("Running component {}", self.label);
         // self.alive = false;
-
         let neibs = self.count_neibs(storage);
         if self.state == true {
             self.state = neibs == 2 || neibs == 3;
@@ -82,7 +82,6 @@ impl Run for Cell {
             self.state = neibs == 3;
         }
 
-        // let should_draw = self.next_state != self.state;
         if true {
             {
                 let pixelmap = storage
@@ -98,11 +97,12 @@ impl Run for Cell {
 
 impl Update for Cell {
     fn update(&mut self, storage: &mut Storage) {
-
         self.heat = if self.state == true {
             255
+        } else if self.heat > 10 {
+            self.heat - 10
         } else {
-            (self.heat - 1) % 255
+            0
         };
 
         // Update cell color
