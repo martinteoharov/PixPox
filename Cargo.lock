@@ -639,7 +639,7 @@ checksum = "0b0c02e1ba0bdb14e965058ca34e09c020f8e507a760df1121728e0aef68d57a"
 dependencies = [
  "bitflags",
  "gpu-descriptor-types",
- "hashbrown",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -649,6 +649,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "363e3677e55ad168fef68cf9de3a4a310b53124c5e784c53a1d70e92d23f2126"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
+dependencies = [
+ "ahash",
 ]
 
 [[package]]
@@ -709,7 +718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10a35a97730320ffe8e2d410b5d3b69279b98d2c14bdb8b70ea89ecf7888d41e"
 dependencies = [
  "autocfg",
- "hashbrown",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -729,12 +738,6 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
 ]
-
-[[package]]
-name = "interner"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b4e0645be5763bf4dc45a3e58bef0823c4d039bbb17340ff0b1c746218e650b"
 
 [[package]]
 name = "jni-sys"
@@ -1122,7 +1125,6 @@ dependencies = [
  "dotenv",
  "env_logger",
  "getrandom",
- "interner",
  "lazy_static",
  "line_drawing",
  "log",
@@ -1143,11 +1145,11 @@ name = "pixpox_app"
 version = "0.1.0"
 dependencies = [
  "env_logger",
- "interner",
  "log",
  "pixpox_ecs",
  "pixpox_renderer",
  "raw-window-handle 0.5.0",
+ "string-interner",
  "wgpu 0.13.1",
  "winit",
  "winit_input_helper",
@@ -1160,10 +1162,10 @@ dependencies = [
  "bit-set",
  "bit-vec",
  "env_logger",
- "interner",
  "log",
  "pixpox_utils",
  "queues",
+ "string-interner",
  "ticktock",
  "winit",
 ]
@@ -1497,6 +1499,17 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "string-interner"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e2531d8525b29b514d25e275a43581320d587b86db302b9a7e464bac579648"
+dependencies = [
+ "cfg-if",
+ "hashbrown 0.11.2",
+ "serde",
+]
 
 [[package]]
 name = "strsim"

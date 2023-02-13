@@ -1,6 +1,5 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::atomic::AtomicUsize};
 
-use interner::global::GlobalPool;
 use lazy_static::lazy_static;
 use log::{debug, error, info};
 

@@ -1,8 +1,5 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
-use interner::global::{GlobalString, GlobalPool};
-
-
 extern crate arrayref;
 
 pub mod custom_components;

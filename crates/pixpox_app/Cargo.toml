@@ -12,7 +12,7 @@ env_logger = "0.9"
 log = "0.4"
 winit_input_helper = "0.13.0"
 raw-window-handle = "0.5"
-interner = "0.1.1"
+string-interner = "0.14.0"
 
 
 # Local crates

@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 
-use interner::global::GlobalPool;
 use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
@@ -15,8 +14,6 @@ use pixpox_ecs::{component::Texture as RenderTexture, World};
 use winit_input_helper::WinitInputHelper;
 
 use log::{debug, error, info, warn};
-
-pub static STRINGS: GlobalPool<String> = GlobalPool::new();
 
 #[derive(Copy, Clone)]
 pub struct AppConfig {
