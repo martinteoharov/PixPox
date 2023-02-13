@@ -97,17 +97,21 @@ impl App {
                     return;
                 }
 
+                // Run components
                 self.world.run();
+
+                // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
 
-                match self.world.storage.query_global_pixel_map::<T>("pixelmap") {
-                    Some(pixelmap) => {
-                        pixelmap.render(pixels);
-                    },
-                    None => {
-                        debug!("COULDN'T GET THE GLOBAL PIXEL MAP FUUUCK");
-                    },
-                }
+                // Fetch Global Pixelmap
+                let pixelmap = self
+                    .world
+                    .storage
+                    .query_global_pixel_map::<T>("pixelmap")
+                    .expect("Could not query Pixel Map");
+
+                // Render Global Pixelmap to frame
+                pixelmap.render(pixels);
             }
 
             // For everything else, for let winit_input_helper collect events to build its state.

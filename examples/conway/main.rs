@@ -1,5 +1,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
+use string_interner::StringInterner;
+
 extern crate arrayref;
 
 pub mod custom_components;
@@ -34,6 +36,7 @@ fn main() {
 
 async fn run() {
     // TODO: read config from file
+    let mut interner = StringInterner::default();
 
     let config = AppConfig {
         WINDOW_TITLE: "Conway",
@@ -50,7 +53,7 @@ async fn run() {
     let mut rng = rand::thread_rng();
 
     let global_pixel_map =
-        GlobalPixelMap::new_empty(config.WINDOW_WIDTH, config.WINDOW_HEIGHT, [0, 0, 0, 255]);
+        GlobalPixelMap::new_empty(config.WINDOW_WIDTH, config.WINDOW_HEIGHT, [0, 0, 0, 0]);
 
     let mut grid: HashMap<LogicalPosition<u32>, bool> = HashMap::new();
 
@@ -73,11 +76,11 @@ async fn run() {
 
     app.world
         .storage
-        .new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+        .new_bucket::<GlobalPixelMap>(interner.get_or_intern("pixelmap"), global_pixel_map);
 
     app.world
         .storage
-        .new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
+        .new_bucket::<HashMap<LogicalPosition<u32>, bool>>(interner.get_or_intern("grid"), grid);
 
     info!(
         "Main::run() create {} entities in {} seconds",
@@ -102,7 +105,7 @@ impl GlobalPixelMap {
 
         for y in 0..height {
             for x in 0..width {
-                let c: [u8; 4] = [0, 0, 0, 255];
+                let c: [u8; 4] = [0, 0, 0, 0];
                 pixelmap.push(c);
             }
         }

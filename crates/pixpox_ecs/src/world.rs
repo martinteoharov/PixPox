@@ -190,7 +190,7 @@ impl World {
             component_vec.update_all(&mut self.storage);
         }
 
-        debug!(
+        info!(
             "Run all components: {} micros, {} seconds",
             now.elapsed().as_micros().to_string(),
             now.elapsed().as_secs_f32().to_string()

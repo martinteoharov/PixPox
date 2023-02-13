@@ -27,9 +27,9 @@ pub struct Cell {
 impl Cell {
     pub fn new(entity_id: usize, pos: LogicalPosition<u32>, alive: bool) -> Self {
         let color = if alive == true {
-            [0, 255, 255, 255]
+            [255, 0, 0, 255]
         } else {
-            [0, 0, 0, 255]
+            [0, 0, 0, 100]
         };
 
         Self {
@@ -107,9 +107,9 @@ impl Update for Cell {
 
         // Update cell color
         self.color = if self.state == true {
-            [0, 255, 255, 255]
+            [255, 0, 0, 255]
         } else {
-            [0, 0, self.heat, 255]
+            [self.heat, 0, 0, 50]
         };
 
         // Fetch & Update cell in grid
