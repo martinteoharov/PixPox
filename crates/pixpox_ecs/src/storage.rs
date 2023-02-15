@@ -19,27 +19,47 @@ pub enum BucketAction {
 }
 pub struct Storage {
     pub buckets: HashMap<SymbolU32, Box<dyn Any>>,
-    interner: StringInterner
+    interner: RefCell<StringInterner>
 }
 
 impl Storage {
     pub fn new() -> Self {
         Self {
             buckets: HashMap::new(),
-            interner: StringInterner::new()
+            interner: RefCell::new(StringInterner::new())
         }
     }
 
     pub fn query_storage<T: 'static>(
+        &self,
+        label: &'static str,
+    ) -> Option<&T> {
+        assert!(
+            self.buckets.contains_key(&self.interner.borrow_mut().get_or_intern(label)),
+            "World::query_storage() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get(&self.interner.borrow_mut().get_or_intern(label)) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_ref::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn query_storage_mut<T: 'static>(
         &mut self,
         label: &'static str,
     ) -> Option<&mut T> {
         assert!(
-            self.buckets.contains_key(&self.interner.get_or_intern(label)),
+            self.buckets.contains_key(&self.interner.borrow_mut().get_or_intern(label)),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get_mut(&self.interner.get_or_intern(label)) {
+        if let Some(data) = self.buckets.get_mut(&self.interner.borrow_mut().get_or_intern(label)) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -55,11 +75,11 @@ impl Storage {
         label: &'static str,
     ) -> Option<&mut T> {
         assert!(
-            self.buckets.contains_key(&self.interner.get_or_intern(label)),
+            self.buckets.contains_key(&self.interner.borrow_mut().get_or_intern(label)),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get_mut(&self.interner.get_or_intern(label)) {
+        if let Some(data) = self.buckets.get_mut(&self.interner.borrow_mut().get_or_intern(label)) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -79,10 +99,10 @@ impl Storage {
 
         match default {
             Some(map) => {
-                self.buckets.insert(self.interner.get_or_intern(label), Box::new(map));
+                self.buckets.insert(self.interner.borrow_mut().get_or_intern(label), Box::new(map));
             },
             None => {
-                self.buckets.insert(self.interner.get_or_intern(label), datastorage);
+                self.buckets.insert(self.interner.borrow_mut().get_or_intern(label), datastorage);
             },
         }
     }
@@ -92,6 +112,6 @@ impl Storage {
         label: &'static str,
         data: T,
     ) {
-        self.buckets.insert(self.interner.get_or_intern(label), Box::new(data));
+        self.buckets.insert(self.interner.borrow_mut().get_or_intern(label), Box::new(data));
     }
 }

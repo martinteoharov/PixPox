@@ -10,7 +10,7 @@ pub trait Label {
 }
 
 pub trait Run {
-    fn run(&mut self, storage: &mut Storage);
+    fn run(&mut self, storage: &Storage);
 }
 
 pub trait Update {

@@ -227,7 +227,7 @@ pub trait ComponentVec {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn push_none(&mut self);
-    fn run_all(&mut self, storage: &mut Storage);
+    fn run_all(&mut self, storage: &Storage);
     fn update_all(&mut self, storage: &mut Storage);
 }
 
@@ -244,7 +244,7 @@ impl<T: 'static + Run + Update> ComponentVec for Vec<Option<T>> {
         self.push(None)
     }
 
-    fn run_all(&mut self, storage: &mut Storage) {
+    fn run_all(&mut self, storage: &Storage) {
         for component in self.iter_mut() {
             if let Some(c) = component {
                 c.run(storage);

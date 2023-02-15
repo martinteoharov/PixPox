@@ -20,6 +20,7 @@ pub struct Cell {
     color: [u8; 4],
     state: bool,
     heat: u8,
+    change: bool
 }
 
 impl Cell {
@@ -37,10 +38,11 @@ impl Cell {
             heat: 0,
             label: "Cell",
             color: color,
+            change: false
         }
     }
 
-    fn count_neibs(&mut self, storage: &mut Storage) -> u8 {
+    fn count_neibs(&mut self, storage: &Storage) -> u8 {
         let grid = storage
             .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
             .expect("Could not query grid");
@@ -69,7 +71,7 @@ impl Label for Cell {
 }
 
 impl Run for Cell {
-    fn run(&mut self, storage: &mut Storage) {
+    fn run(&mut self, storage: &Storage) {
         let neibs = self.count_neibs(storage);
 
         if self.state == true {
@@ -86,21 +88,15 @@ impl Run for Cell {
             0
         };
 
-        let old_color = self.color;
         // Update cell color
+        let old_color = self.color;
         self.color = if self.state == true {
             [255, 0, 0, 255]
         } else {
             [self.heat, 0, 0, 50]
         };
 
-        if old_color != self.color {
-            let pixelmap = storage
-                .query_storage::<GlobalPixelMap>("pixelmap")
-                .expect("Could not query Pixel Map");
-
-            pixelmap.draw_pos(self.pos, self.color);
-        }
+        self.change = old_color != self.color;
     }
 }
 
@@ -108,12 +104,20 @@ impl Update for Cell {
     fn update(&mut self, storage: &mut Storage) {
         // Fetch & Update cell in grid
         let grid = storage
-            .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
+            .query_storage_mut::<HashMap<LogicalPosition<u32>, bool>>("grid")
             .expect("Could not get grid");
 
         let grid_pixel = grid.get_mut(&self.pos).expect("Could not get grid_pixel");
         debug!("state: {}, next_state: {}", grid_pixel, self.state);
         *grid_pixel = self.state;
+
+        if self.change {
+            let pixelmap = storage
+                .query_storage_mut::<GlobalPixelMap>("pixelmap")
+                .expect("Could not query Pixel Map");
+
+            pixelmap.draw_pos(self.pos, self.color);
+        }
     }
 }
 
