@@ -8,10 +8,12 @@ use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,
     sync::atomic::{AtomicU32, AtomicUsize, Ordering},
+    thread,
     time::{self, Duration, Instant},
 };
 
 use log::{debug, error, info};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
     component::{self},
@@ -52,8 +54,7 @@ pub struct World {
     pub entities: EntityManager,
     pub component_vecs: Vec<Box<dyn ComponentVec>>,
     pub storage: Storage,
-    pub change_tick: time::Instant,
-    pub last_change_tick: time::Instant,
+    pub change_tick: Instant,
 }
 
 impl World {
@@ -61,21 +62,13 @@ impl World {
         let entities = EntityManager::new();
         let component_vecs = Vec::new();
 
-        // show some fps measurements every 5 seconds
-        let mut fps = Timer::apply(|delta_t, prev_tick| (delta_t, *prev_tick), 0)
-            .every(time::Duration::from_secs(5))
-            .start(time::Instant::now());
-
-        print_type_of(&fps);
-
         Self {
             id: WorldId::new()
                 .expect("More PixPox worlds have been created than currently supported."),
             entities,
             component_vecs,
-            change_tick: time::Instant::now(),
-            last_change_tick: time::Instant::now(),
             storage: Storage::new(),
+            change_tick: Instant::now(),
         }
     }
 
@@ -83,7 +76,7 @@ impl World {
         self.new_entity()
     }
 
-    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Update + Clone>(
+    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Update + Clone + Sync + Send>(
         &mut self,
         entity: Entity,
         mut component: ComponentType,
@@ -145,7 +138,8 @@ impl World {
                     .filter_map(|entity| {
                         component_vec
                             .get(entity.id)
-                            .expect("Entity could not be found in vec").as_ref()
+                            .expect("Entity could not be found in vec")
+                            .as_ref()
                     })
                     .collect::<Vec<&T>>();
 
@@ -182,9 +176,9 @@ impl World {
     pub fn run(&mut self) {
         let now = Instant::now();
 
-        for component_vec in self.component_vecs.iter_mut() {
-            component_vec.run_all(&mut self.storage);
-        }
+        self.component_vecs.par_iter().for_each(|component_vec| {
+            component_vec.run_all(&self.storage);
+        });
 
         info!(
             "Run all components: {} seconds",
@@ -223,28 +217,29 @@ impl World {
     fn serialize() {}
 }
 
-pub trait ComponentVec {
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+pub trait ComponentVec: Sync + Send {
+    fn as_any(&self) -> &(dyn std::any::Any + Sync + Send);
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Sync + Send);
     fn push_none(&mut self);
-    fn run_all(&mut self, storage: &mut Storage);
+    fn run_all(&mut self, storage: &Storage);
     fn update_all(&mut self, storage: &mut Storage);
 }
 
-impl<T: 'static + Run + Update> ComponentVec for Vec<Option<T>> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self as &dyn std::any::Any
+impl<T: 'static + Run + Update + Sync + Send> ComponentVec for Vec<Option<T>> {
+    fn as_any(&self) -> &(dyn std::any::Any + Sync + Send) {
+        self as &(dyn std::any::Any + Sync + Send)
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self as &mut dyn std::any::Any
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Sync + Send){
+        self as &mut (dyn std::any::Any + Sync + Send)
     }
 
     fn push_none(&mut self) {
         self.push(None)
     }
 
-    fn run_all(&mut self, storage: &mut Storage) {
+    fn run_all(&mut self, storage: &Storage) {
         for component in self.iter_mut() {
             if let Some(c) = component {
                 c.run(storage);

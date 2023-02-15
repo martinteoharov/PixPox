@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Instant};
 
 use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
@@ -32,6 +32,7 @@ pub struct App {
     input: WinitInputHelper,
     paused: bool,
     quit: bool,
+    last_update: Instant,
 }
 
 impl App {
@@ -82,6 +83,7 @@ impl App {
             window,
             paused: false,
             quit: false,
+            last_update: Instant::now(),
         }
     }
 
@@ -91,6 +93,11 @@ impl App {
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
+                let elapsed = self.last_update.elapsed().as_secs_f32();
+                self.last_update = Instant::now();
+
+                info!("FPS: {}", 1.0 / elapsed);
+
                 // Run components
                 self.world.run();
 
