@@ -7,11 +7,13 @@ use std::{
     borrow::BorrowMut,
     cell::{RefCell, RefMut},
     collections::HashMap,
-    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
+    sync::{atomic::{AtomicU32, AtomicUsize, Ordering}, Mutex, Arc, RwLock},
+    thread,
     time::{self, Duration, Instant},
 };
 
 use log::{debug, error, info};
+use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator, IntoParallelRefIterator};
 
 use crate::{
     component::{self},
@@ -50,8 +52,8 @@ pub enum BucketAction {
 pub struct World {
     id: WorldId,
     pub entities: EntityManager,
-    pub component_vecs: Vec<Box<dyn ComponentVec>>,
-    pub storage: Storage,
+    pub component_vecs: Vec<Box<dyn ComponentVec + Send>>,
+    pub storage: RwLock<Storage>,
     pub change_tick: time::Instant,
     pub last_change_tick: time::Instant,
 }
@@ -75,7 +77,7 @@ impl World {
             component_vecs,
             change_tick: time::Instant::now(),
             last_change_tick: time::Instant::now(),
-            storage: Storage::new(),
+            storage: RwLock::new(Storage::new()),
         }
     }
 
@@ -83,7 +85,7 @@ impl World {
         self.new_entity()
     }
 
-    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Update + Clone>(
+    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Update + Clone + Send + Sync>(
         &mut self,
         entity: Entity,
         mut component: ComponentType,
@@ -145,7 +147,8 @@ impl World {
                     .filter_map(|entity| {
                         component_vec
                             .get(entity.id)
-                            .expect("Entity could not be found in vec").as_ref()
+                            .expect("Entity could not be found in vec")
+                            .as_ref()
                     })
                     .collect::<Vec<&T>>();
 
@@ -206,6 +209,14 @@ impl World {
         let entity = self.entities.create();
         let now = Instant::now();
 
+        /*
+               self.component_vecs
+                   .par_iter_mut()
+                   .for_each(|component_vec| {
+                       component_vec.push_none();
+                   });
+        */
+
         for component_vec in self.component_vecs.iter_mut() {
             component_vec.push_none();
         }
@@ -223,40 +234,40 @@ impl World {
     fn serialize() {}
 }
 
-pub trait ComponentVec {
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+pub trait ComponentVec: Send + Sync {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync);
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
     fn push_none(&mut self);
-    fn run_all(&mut self, storage: &Storage);
-    fn update_all(&mut self, storage: &mut Storage);
+    fn run_all(&mut self, storage: &RwLock<Storage>);
+    fn update_all(&mut self, storage: &mut RwLock<Storage>);
 }
 
-impl<T: 'static + Run + Update> ComponentVec for Vec<Option<T>> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self as &dyn std::any::Any
+impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self as &(dyn std::any::Any + Send + Sync)
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self as &mut dyn std::any::Any
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync) {
+        self as &mut (dyn std::any::Any + Send + Sync)
     }
 
     fn push_none(&mut self) {
         self.push(None)
     }
 
-    fn run_all(&mut self, storage: &Storage) {
-        for component in self.iter_mut() {
+    fn run_all(&mut self, storage: &RwLock<Storage>) {
+        self.par_iter_mut().for_each(|component| {
             if let Some(c) = component {
-                c.run(storage);
+                c.run(&storage.read().unwrap());
             }
-        }
+        })
     }
 
-    fn update_all(&mut self, storage: &mut Storage) {
-        for component in self.iter_mut() {
+    fn update_all(&mut self, storage: &mut RwLock<Storage>) {
+        self.par_iter_mut().for_each(|component| {
             if let Some(c) = component {
-                c.update(storage);
+                c.update(&storage);
             }
-        }
+        })
     }
 }

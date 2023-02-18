@@ -14,6 +14,7 @@ env_logger = "0.9"
 log = "0.4"
 ticktock = "0.8.0"
 string-interner = "0.14.0"
+rayon = "1.6.1"
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }

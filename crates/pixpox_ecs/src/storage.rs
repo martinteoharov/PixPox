@@ -5,7 +5,7 @@ use std::{
     borrow::BorrowMut,
     cell::RefCell,
     collections::{hash_map::RandomState, HashMap},
-    fmt::Debug,
+    fmt::Debug, sync::{Mutex, Arc}, ops::DerefMut,
 };
 
 use log::{debug, info};
@@ -17,16 +17,16 @@ pub enum BucketAction {
     GET,
     PUT,
 }
+
 pub struct Storage {
-    pub buckets: HashMap<SymbolU32, Box<dyn Any>>,
-    interner: RefCell<StringInterner>
+    pub buckets: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
 }
+
 
 impl Storage {
     pub fn new() -> Self {
         Self {
             buckets: HashMap::new(),
-            interner: RefCell::new(StringInterner::new())
         }
     }
 
@@ -35,11 +35,11 @@ impl Storage {
         label: &'static str,
     ) -> Option<&T> {
         assert!(
-            self.buckets.contains_key(&self.interner.borrow_mut().get_or_intern(label)),
+            self.buckets.contains_key(&label),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get(&self.interner.borrow_mut().get_or_intern(label)) {
+        if let Some(data) = self.buckets.get(&label) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_ref::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -55,11 +55,11 @@ impl Storage {
         label: &'static str,
     ) -> Option<&mut T> {
         assert!(
-            self.buckets.contains_key(&self.interner.borrow_mut().get_or_intern(label)),
+            self.buckets.contains_key(&label),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get_mut(&self.interner.borrow_mut().get_or_intern(label)) {
+        if let Some(data) = self.buckets.get_mut(&label) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -75,11 +75,11 @@ impl Storage {
         label: &'static str,
     ) -> Option<&mut T> {
         assert!(
-            self.buckets.contains_key(&self.interner.borrow_mut().get_or_intern(label)),
+            self.buckets.contains_key(&label),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get_mut(&self.interner.borrow_mut().get_or_intern(label)) {
+        if let Some(data) = self.buckets.get_mut(&label) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -90,7 +90,15 @@ impl Storage {
         None
     }
 
-    pub fn new_hashmap_bucket<K: 'static, V: 'static>(
+    pub fn new_bucket<T: 'static + Send + Sync>(
+        &mut self,
+        label: &'static str,
+        data: T,
+    ) {
+        self.buckets.insert(label, Box::new(data));
+    }
+
+    pub fn new_hashmap_bucket<K: 'static + Send + Sync, V: 'static + Send + Sync>(
         &mut self,
         label: &'static str,
         default: Option<HashMap<K, V>>,
@@ -99,19 +107,11 @@ impl Storage {
 
         match default {
             Some(map) => {
-                self.buckets.insert(self.interner.borrow_mut().get_or_intern(label), Box::new(map));
+                self.buckets.insert(label, Box::new(map));
             },
             None => {
-                self.buckets.insert(self.interner.borrow_mut().get_or_intern(label), datastorage);
+                self.buckets.insert(label, datastorage);
             },
         }
-    }
-
-    pub fn new_bucket<T: 'static>(
-        &mut self,
-        label: &'static str,
-        data: T,
-    ) {
-        self.buckets.insert(self.interner.borrow_mut().get_or_intern(label), Box::new(data));
     }
 }
