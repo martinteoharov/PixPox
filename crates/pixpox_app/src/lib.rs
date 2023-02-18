@@ -1,6 +1,7 @@
 use std::{fmt::Debug, mem, sync::Mutex, thread, time};
 
 use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
+use ringbuf::StaticRb;
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, VirtualKeyCode},
@@ -86,7 +87,8 @@ impl App {
     }
 
     pub async fn run<T: 'static + RenderTexture + Default + Send>(&mut self) {
-        let pixelmap_mutex: Mutex<T> = Mutex::new(T::default());
+        let pixelmap_ring_buffer: StaticRb<T, 1> = StaticRb::<T, 1>::default();
+        let (mut prod, mut cons) = pixelmap_ring_buffer.split_ref();
 
         crossbeam::scope(|scope| {
             let mut event_loop = &mut self.event_loop;
@@ -96,7 +98,6 @@ impl App {
                 loop {
                     // Run components
                     world.run();
-                    let mut pixelmap_guard = pixelmap_mutex.lock().unwrap();
 
                     // Lock storage
                     let mut storage = world.storage.write().unwrap();
