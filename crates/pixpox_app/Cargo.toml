@@ -18,3 +18,4 @@ string-interner = "0.14.0"
 # Local crates
 pixpox_ecs = { path = "../pixpox_ecs" }
 pixpox_renderer = { path = "../pixpox_renderer" }
+crossbeam = "0.8.2"

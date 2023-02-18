@@ -58,7 +58,7 @@ async fn run() {
             let entity = app.world.spawn();
 
             let pos = LogicalPosition::new(x, y);
-            let alive = rng.gen_bool(0.1);
+            let alive = rng.gen_bool(0.50);
 
             let cell_component = Cell::new(entity.id, pos, alive);
 
@@ -70,13 +70,14 @@ async fn run() {
         }
     }
 
-    app.world
-        .storage
-        .new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+    // Lock storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
 
-    app.world
-        .storage
-        .new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+
+        storage.new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
+    }
 
     info!(
         "Main::run() create {} entities in {} seconds",
@@ -93,6 +94,12 @@ pub struct GlobalPixelMap {
     width: u32,
     height: u32,
     clear_color: [u8; 4],
+}
+
+impl Default for GlobalPixelMap {
+    fn default() -> Self {
+        GlobalPixelMap::new_empty(400, 300, [0, 0, 0, 0])
+    }
 }
 
 impl GlobalPixelMap {

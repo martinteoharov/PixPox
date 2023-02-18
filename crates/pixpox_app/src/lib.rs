@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, mem, sync::Mutex, thread, time};
 
 use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
@@ -85,89 +85,105 @@ impl App {
         }
     }
 
-    pub async fn run<T: 'static + RenderTexture>(&mut self) {
-        self.event_loop.run_return(|event, _target, control_flow| {
-            debug!("Event loop");
+    pub async fn run<T: 'static + RenderTexture + Default + Send>(&mut self) {
+        let pixelmap_mutex: Mutex<T> = Mutex::new(T::default());
 
-            // The one and only event that winit_input_helper doesn't have for us...
-            if let Event::RedrawRequested(_) = event {
-                // Run components
-                self.world.run();
+        crossbeam::scope(|scope| {
+            let mut event_loop = &mut self.event_loop;
+            let mut world = &mut self.world;
 
-                // Get screen frame to render to
-                let pixels = self.pixels.get_frame_mut();
+            scope.spawn(|_| {
+                loop {
+                    // Run components
+                    world.run();
+                    let mut pixelmap_guard = pixelmap_mutex.lock().unwrap();
 
-                // Fetch Global Pixelmap
-                let pixelmap = self
-                    .world
-                    .storage
-                    .query_global_pixel_map::<T>("pixelmap")
-                    .expect("Could not query Pixel Map");
+                    // Lock storage
+                    let mut storage = world.storage.write().unwrap();
 
-                // Render Global Pixelmap to frame
-                pixelmap.render(pixels);
+                    // Fetch Global Pixelmap
+                    let pixelmap = storage
+                        .query_global_pixel_map::<T>("pixelmap")
+                        .expect("Could not query Pixel Map");
 
-                if let Err(err) = self.pixels.render() {
-                    error!("pixels.render() failed: {}", err);
-                    *control_flow = ControlFlow::Exit;
-                    return;
+                    mem::swap(&mut *pixelmap_guard, pixelmap); // what the fuck?
                 }
-            }
+            });
 
-            // For everything else, for let winit_input_helper collect events to build its state.
-            // It returns `true` when it is time to update our game state and request a redraw.
-            if self.input.update(&event) {
-                // Close events
-                if self.input.key_pressed(VirtualKeyCode::Escape) || self.input.quit() {
-                    *control_flow = ControlFlow::Exit;
-                    return;
-                }
-                if self.input.key_pressed(VirtualKeyCode::P) {
-                    self.paused = !self.paused;
-                }
-                if self.input.key_pressed_os(VirtualKeyCode::Space) {
-                    // Space is frame-step, so ensure we're paused
-                    self.paused = true;
-                }
-                // Handle mouse. This is a bit involved since support some simple
-                // line drawing (mostly because it makes nice looking patterns).
-                let (mouse_cell, mouse_prev_cell) = self
-                    .input
-                    .mouse()
-                    .map(|(mx, my)| {
-                        let (dx, dy) = self.input.mouse_diff();
-                        let prev_x = mx - dx;
-                        let prev_y = my - dy;
+            event_loop.run_return(|event, _target, control_flow| {
+                debug!("Event loop");
 
-                        let (mx_i, my_i) = self
-                            .pixels
-                            .window_pos_to_pixel((mx, my))
-                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+                // The one and only event that winit_input_helper doesn't have for us...
+                if let Event::RedrawRequested(_) = event {
+                    // Get screen frame to render to
+                    let pixels = self.pixels.get_frame_mut();
 
-                        let (px_i, py_i) = self
-                            .pixels
-                            .window_pos_to_pixel((prev_x, prev_y))
-                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+                    // Render Global Pixelmap to frame
+                    pixelmap_mutex.lock().unwrap().render(pixels);
 
-                        (
-                            (mx_i as isize, my_i as isize),
-                            (px_i as isize, py_i as isize),
-                        )
-                    })
-                    .unwrap_or_default();
-
-                // Resize the window
-                if let Some(size) = self.input.window_resized() {
-                    info!("Resize detected");
-                    if let Err(err) = self.pixels.resize_surface(size.width, size.height) {
-                        error!("pixels.resize_surface() failed: {err}");
+                    if let Err(err) = self.pixels.render() {
+                        error!("pixels.render() failed: {}", err);
                         *control_flow = ControlFlow::Exit;
                         return;
                     }
                 }
 
-                self.window.request_redraw();
-            }
-        });
+                // For everything else, for let winit_input_helper collect events to build its state.
+                // It returns `true` when it is time to update our game state and request a redraw.
+                if self.input.update(&event) {
+                    // Close events
+                    if self.input.key_pressed(VirtualKeyCode::Escape) || self.input.quit() {
+                        *control_flow = ControlFlow::Exit;
+                        return;
+                    }
+                    if self.input.key_pressed(VirtualKeyCode::P) {
+                        self.paused = !self.paused;
+                    }
+                    if self.input.key_pressed_os(VirtualKeyCode::Space) {
+                        // Space is frame-step, so ensure we're paused
+                        self.paused = true;
+                    }
+                    // Handle mouse. This is a bit involved since support some simple
+                    // line drawing (mostly because it makes nice looking patterns).
+                    let (mouse_cell, mouse_prev_cell) = self
+                        .input
+                        .mouse()
+                        .map(|(mx, my)| {
+                            let (dx, dy) = self.input.mouse_diff();
+                            let prev_x = mx - dx;
+                            let prev_y = my - dy;
+
+                            let (mx_i, my_i) = self
+                                .pixels
+                                .window_pos_to_pixel((mx, my))
+                                .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+
+                            let (px_i, py_i) = self
+                                .pixels
+                                .window_pos_to_pixel((prev_x, prev_y))
+                                .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+
+                            (
+                                (mx_i as isize, my_i as isize),
+                                (px_i as isize, py_i as isize),
+                            )
+                        })
+                        .unwrap_or_default();
+
+                    // Resize the window
+                    if let Some(size) = self.input.window_resized() {
+                        info!("Resize detected");
+                        if let Err(err) = self.pixels.resize_surface(size.width, size.height) {
+                            error!("pixels.resize_surface() failed: {err}");
+                            *control_flow = ControlFlow::Exit;
+                            return;
+                        }
+                    }
+
+                    self.window.request_redraw();
+                }
+            });
+        })
+        .unwrap();
     }
 }

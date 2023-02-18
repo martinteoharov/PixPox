@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::RwLock};
 
 use log::debug;
 use pixpox_app::App;
@@ -20,7 +20,7 @@ pub struct Cell {
     color: [u8; 4],
     state: bool,
     heat: u8,
-    change: bool
+    change: bool,
 }
 
 impl Cell {
@@ -38,7 +38,7 @@ impl Cell {
             heat: 0,
             label: "Cell",
             color: color,
-            change: false
+            change: false,
         }
     }
 
@@ -101,17 +101,19 @@ impl Run for Cell {
 }
 
 impl Update for Cell {
-    fn update(&mut self, storage: &mut Storage) {
-        // Fetch & Update cell in grid
-        let grid = storage
-            .query_storage_mut::<HashMap<LogicalPosition<u32>, bool>>("grid")
-            .expect("Could not get grid");
-
-        let grid_pixel = grid.get_mut(&self.pos).expect("Could not get grid_pixel");
-        debug!("state: {}, next_state: {}", grid_pixel, self.state);
-        *grid_pixel = self.state;
-
+    fn update(&mut self, rw_storage: &RwLock<Storage>) {
         if self.change {
+            let mut storage = rw_storage.write().unwrap();
+
+            // Fetch & Update cell in grid
+            let grid = storage
+                .query_storage_mut::<HashMap<LogicalPosition<u32>, bool>>("grid")
+                .expect("Could not get grid");
+
+            let grid_pixel = grid.get_mut(&self.pos).expect("Could not get grid_pixel");
+            debug!("state: {}, next_state: {}", grid_pixel, self.state);
+            *grid_pixel = self.state;
+
             let pixelmap = storage
                 .query_storage_mut::<GlobalPixelMap>("pixelmap")
                 .expect("Could not query Pixel Map");

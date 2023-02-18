@@ -17,3 +17,5 @@ string-interner = "0.14.0"
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
+rayon = "1.6.1"
+crossbeam = "0.8.2"

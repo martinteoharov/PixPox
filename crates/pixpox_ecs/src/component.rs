@@ -1,3 +1,5 @@
+use std::sync::RwLock;
+
 use crate::Storage;
 
 /*
@@ -14,7 +16,7 @@ pub trait Run {
 }
 
 pub trait Update {
-    fn update(&mut self, storage: &mut Storage);
+    fn update(&mut self, storage: &RwLock<Storage>);
 }
 
 /*
