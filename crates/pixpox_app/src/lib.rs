@@ -97,10 +97,11 @@ impl App {
                 // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
 
+                // Lock storage
+                let mut storage = self.world.storage.write().unwrap();
+
                 // Fetch Global Pixelmap
-                let pixelmap = self
-                    .world
-                    .storage
+                let pixelmap = storage
                     .query_global_pixel_map::<T>("pixelmap")
                     .expect("Could not query Pixel Map");
 
