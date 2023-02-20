@@ -18,3 +18,5 @@ rayon = "1.6.1"
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
+arc-interner = "0.7.0"
+lasso = { version = "0.6.0", features = ["multi-threaded"] }

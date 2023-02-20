@@ -17,3 +17,6 @@ thiserror = "1.0"
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
+imgui = "0.10.0"
+imgui-winit-support = "0.10.0"
+imgui-wgpu = "0.22.0"

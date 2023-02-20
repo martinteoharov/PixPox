@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use pixpox_renderer::{wgpu::Texture, Pixels, SurfaceTexture};
+use pixpox_renderer::{gui::Gui, wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, VirtualKeyCode},
@@ -24,9 +24,10 @@ pub struct AppConfig {
     pub DEBUG: bool,
 }
 
-pub struct App {
+pub struct App<'a> {
     pub world: World,
     pixels: Pixels,
+    pub gui: Gui<'a>,
     event_loop: EventLoop<()>,
     window: Window,
     input: WinitInputHelper,
@@ -34,9 +35,9 @@ pub struct App {
     quit: bool,
 }
 
-impl App {
+impl <'a> App <'a> {
     // Create a new application. Panics if renderer can not be initialized.
-    pub fn new(config: AppConfig) -> App {
+    pub fn new(config: AppConfig) -> App<'a> {
         // Initialize WGPU logging
         env_logger::init();
 
@@ -74,9 +75,12 @@ impl App {
             }
         };
 
+        let mut gui = Gui::new(&window, &pixels);
+
         Self {
             world,
             pixels,
+            gui,
             input,
             event_loop,
             window,
@@ -91,6 +95,11 @@ impl App {
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
+                // Prepare Dear ImGui
+                self.gui
+                    .prepare(&self.window)
+                    .expect("gui.prepare() failed");
+
                 // Run components
                 self.world.run();
 
@@ -108,13 +117,26 @@ impl App {
                 // Render Global Pixelmap to frame
                 pixelmap.render(pixels);
 
-                if let Err(err) = self.pixels.render() {
-                    error!("pixels.render() failed: {}", err);
-                    *control_flow = ControlFlow::Exit;
-                    return;
-                }
+                // if let Err(err) = self.pixels.render() {
+                //     error!("pixels.render() failed: {}", err);
+                //     *control_flow = ControlFlow::Exit;
+                //     return;
+                // }
+
+                let render_result = self.pixels.render_with(|encoder, render_target, context| {
+                    // Render the world texture
+                    context.scaling_renderer.render(encoder, render_target);
+
+                    // Render Dear ImGui
+                    self.gui
+                        .render(&self.window, encoder, render_target, context)?;
+
+                    Ok(())
+                });
             }
 
+            // Handle input events
+            self.gui.handle_event(&self.window, &event);
             // For everything else, for let winit_input_helper collect events to build its state.
             // It returns `true` when it is time to update our game state and request a redraw.
             if self.input.update(&event) {

@@ -40,6 +40,7 @@ use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::num::NonZeroU32;
 use thiserror::Error;
 pub use wgpu;
+pub mod gui;
 
 mod builder;
 

@@ -1,3 +1,4 @@
+use lasso::{ThreadedRodeo, Spur};
 use string_interner::{symbol::SymbolU32, StringInterner};
 
 use std::{
@@ -5,13 +6,14 @@ use std::{
     borrow::BorrowMut,
     cell::RefCell,
     collections::{hash_map::RandomState, HashMap},
-    fmt::Debug, sync::{Mutex, Arc}, ops::DerefMut,
+    fmt::Debug,
+    ops::DerefMut,
+    sync::{Arc, Mutex},
 };
 
 use log::{debug, info};
 
 use crate::Texture;
-
 
 pub enum BucketAction {
     GET,
@@ -19,29 +21,28 @@ pub enum BucketAction {
 }
 
 pub struct Storage {
-    pub buckets: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
-    interner: StringInterner
+    pub buckets: HashMap<Spur, Box<dyn Any + Send + Sync>>,
+    interner: ThreadedRodeo
 }
-
 
 impl Storage {
     pub fn new() -> Self {
+
         Self {
             buckets: HashMap::new(),
-            interner: StringInterner::new()
+            interner: ThreadedRodeo::new()
         }
     }
 
-    pub fn query_storage<T: 'static>(
-        &self,
-        label: &'static str,
-    ) -> Option<&T> {
+    pub fn query_storage<T: 'static>(&self, label: &'static str) -> Option<&T> {
+        let key = &self.interner.get(label).unwrap();
+
         assert!(
-            self.buckets.contains_key(&label),
+            self.buckets.contains_key(key),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get(&label) {
+        if let Some(data) = self.buckets.get(key) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_ref::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -52,16 +53,15 @@ impl Storage {
         None
     }
 
-    pub fn query_storage_mut<T: 'static>(
-        &mut self,
-        label: &'static str,
-    ) -> Option<&mut T> {
+    pub fn query_storage_mut<T: 'static>(&mut self, label: &'static str) -> Option<&mut T> {
+        let key = &self.interner.get(label).unwrap();
+
         assert!(
-            self.buckets.contains_key(&label),
+            self.buckets.contains_key(key),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get_mut(&label) {
+        if let Some(data) = self.buckets.get_mut(key) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -76,12 +76,14 @@ impl Storage {
         &mut self,
         label: &'static str,
     ) -> Option<&mut T> {
+        let key = &self.interner.get(label).unwrap();
+
         assert!(
-            self.buckets.contains_key(&label),
+            self.buckets.contains_key(key),
             "World::query_storage() didn't find an item you were looking for."
         );
 
-        if let Some(data) = self.buckets.get_mut(&label) {
+        if let Some(data) = self.buckets.get_mut(key) {
             // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
                 // debug!("Storage::query_storage() - value downcasted successfully");
@@ -92,12 +94,10 @@ impl Storage {
         None
     }
 
-    pub fn new_bucket<T: 'static + Send + Sync>(
-        &mut self,
-        label: &'static str,
-        data: T,
-    ) {
-        self.buckets.insert(label, Box::new(data));
+    pub fn new_bucket<T: 'static + Send + Sync>(&mut self, label: &'static str, data: T) {
+        let key = self.interner.get_or_intern(label);
+
+        self.buckets.insert(key, Box::new(data));
     }
 
     pub fn new_hashmap_bucket<K: 'static + Send + Sync, V: 'static + Send + Sync>(
@@ -105,14 +105,15 @@ impl Storage {
         label: &'static str,
         default: Option<HashMap<K, V>>,
     ) {
+        let key = self.interner.get_or_intern(label);
         let datastorage = Box::new(HashMap::<K, V>::new());
 
         match default {
             Some(map) => {
-                self.buckets.insert(label, Box::new(map));
+                self.buckets.insert(key, Box::new(map));
             },
             None => {
-                self.buckets.insert(label, datastorage);
+                self.buckets.insert(key, datastorage);
             },
         }
     }

@@ -40,3 +40,4 @@ pixpox_renderer = { path = "crates/pixpox_renderer" }
 pixpox_utils = { path = "crates/pixpox_utils" }
 arrayref = "0.3.6"
 lazy_static = "1.4.0"
+imgui = "0.10.0"
