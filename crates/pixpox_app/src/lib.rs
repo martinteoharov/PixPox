@@ -36,7 +36,7 @@ pub struct App {
 
 impl App {
     // Create a new application. Panics if renderer can not be initialized.
-    pub async fn new(config: AppConfig) -> App {
+    pub fn new(config: AppConfig) -> App {
         // Initialize WGPU logging
         env_logger::init();
 
@@ -44,13 +44,13 @@ impl App {
 
         // Define the event loop
         let event_loop = EventLoop::new();
-        let mut input = WinitInputHelper::new();
+        let input = WinitInputHelper::new();
 
         let window = {
             let size = LogicalSize::new(config.WINDOW_WIDTH as f64, config.WINDOW_HEIGHT as f64);
             let scaled_size = LogicalSize::new(
-                config.WINDOW_WIDTH as f64 * 3.0,
-                config.WINDOW_HEIGHT as f64 * 3.0,
+                config.WINDOW_WIDTH as f64 * 2.0,
+                config.WINDOW_HEIGHT as f64 * 2.0,
             );
             WindowBuilder::new()
                 .with_title(config.WINDOW_TITLE)
@@ -60,7 +60,7 @@ impl App {
                 .unwrap()
         };
 
-        let mut pixels = {
+        let pixels = {
             let window_size = window.inner_size();
             let surface_texture =
                 SurfaceTexture::new(window_size.width, window_size.height, &window);

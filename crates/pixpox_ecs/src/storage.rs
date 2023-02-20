@@ -20,6 +20,7 @@ pub enum BucketAction {
 
 pub struct Storage {
     pub buckets: HashMap<&'static str, Box<dyn Any + Send + Sync>>,
+    interner: StringInterner
 }
 
 
@@ -27,6 +28,7 @@ impl Storage {
     pub fn new() -> Self {
         Self {
             buckets: HashMap::new(),
+            interner: StringInterner::new()
         }
     }
 

@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::{sync::RwLock};
 
 use crate::Storage;
 
@@ -25,5 +25,6 @@ pub trait Update {
  * These traits can be optionally implemented.
  */
 pub trait Texture {
-    fn render(&mut self, pixels: &mut [u8]);
+    fn render(&self, pixels: &mut [u8]);
+    fn size(&self) -> (u32, u32);
 }

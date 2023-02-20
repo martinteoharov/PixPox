@@ -36,13 +36,13 @@ async fn run() {
     // TODO: read config from file
     let config = AppConfig {
         WINDOW_TITLE: "Conway",
-        WINDOW_WIDTH: 400,
-        WINDOW_HEIGHT: 300,
+        WINDOW_HEIGHT: 250,
+        WINDOW_WIDTH: 500,
         WINDOW_FULLSCREEN: false,
         DEBUG: true,
     };
 
-    let mut app = App::new(config).await;
+    let mut app = App::new(config);
 
     let now = Instant::now();
     let mut entities_count = 0;
@@ -58,7 +58,7 @@ async fn run() {
             let entity = app.world.spawn();
 
             let pos = LogicalPosition::new(x, y);
-            let alive = rng.gen_bool(0.50);
+            let alive = rng.gen_bool(0.10);
 
             let cell_component = Cell::new(entity.id, pos, alive);
 
@@ -77,6 +77,8 @@ async fn run() {
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
 
         storage.new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
+
+        storage.new_bucket::<(u32, u32)>("grid-size", (config.WINDOW_WIDTH, config.WINDOW_HEIGHT));
     }
 
     info!(
@@ -94,12 +96,6 @@ pub struct GlobalPixelMap {
     width: u32,
     height: u32,
     clear_color: [u8; 4],
-}
-
-impl Default for GlobalPixelMap {
-    fn default() -> Self {
-        GlobalPixelMap::new_empty(400, 300, [0, 0, 0, 0])
-    }
 }
 
 impl GlobalPixelMap {
@@ -140,10 +136,14 @@ impl GlobalPixelMap {
 }
 
 impl Texture for GlobalPixelMap {
-    fn render(&mut self, pixels: &mut [u8]) {
+    fn render(&self, pixels: &mut [u8]) {
         debug!("Rendering GlobalPixelMap");
         for (c, pix) in self.pixelmap.iter().zip(pixels.chunks_exact_mut(4)) {
             pix.copy_from_slice(c);
         }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.width, self.height);
     }
 }

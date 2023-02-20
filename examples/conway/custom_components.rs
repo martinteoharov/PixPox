@@ -48,8 +48,9 @@ impl Cell {
             .expect("Could not query grid");
 
         let (x, y) = (self.pos.x, self.pos.y);
+        let (width, height) = storage.query_storage::<(u32, u32)>("grid-size").expect("Exploding penis");
 
-        if x == 0 || y == 0 || x >= 399 || y >= 299 {
+        if x == 0 || y == 0 || x >= *width - 1 || y >= *height - 1 {
             return 0;
         }
 
@@ -83,7 +84,7 @@ impl Run for Cell {
         self.heat = if self.state == true {
             255
         } else if self.heat > 10 {
-            self.heat - 10
+            self.heat - 1
         } else {
             0
         };
