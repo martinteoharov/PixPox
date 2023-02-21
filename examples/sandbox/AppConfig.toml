@@ -1,0 +1,5 @@
+window_title = "Sandbox"
+window_height = 160
+window_width = 300
+window_scale = 6.0
+window_fullscreen = false

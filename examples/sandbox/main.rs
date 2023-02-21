@@ -1,6 +1,5 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
-extern crate arrayref;
 
 pub mod custom_components;
 
@@ -11,7 +10,6 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::{collections::HashMap, time::Instant};
 
-use arrayref::array_ref;
 use custom_components::Cell;
 use dotenv::dotenv;
 
@@ -19,7 +17,7 @@ use imgui::Ui;
 use log::{debug, error, info};
 use pixpox::pixpox_app::App;
 use pixpox::pixpox_utils;
-use pixpox_app::AppConfig;
+use pixpox_app::{Config};
 use pixpox_ecs::entity::Entity;
 use pixpox_ecs::Run;
 use pixpox_ecs::{world, Texture};
@@ -39,16 +37,11 @@ fn show_metrics(ui: &mut Ui, state: &mut bool) {
 }
 
 async fn run() {
-    // TODO: read config from file
-    let config = AppConfig {
-        WINDOW_TITLE: "Conway",
-        WINDOW_HEIGHT: 250,
-        WINDOW_WIDTH: 500,
-        WINDOW_FULLSCREEN: false,
-        DEBUG: true,
-    };
+    let cfg: Config = confy::load_path("./examples/sandbox/AppConfig.toml").expect("Could not load config.");
 
-    let mut app = App::new(config);
+    dbg!(cfg.clone());
+    let mut app = App::new(cfg.clone());
+
 
     let now = Instant::now();
     let mut entities_count = 0;
@@ -79,13 +72,13 @@ async fn run() {
 
     // Define global data structures
     let global_pixel_map =
-        GlobalPixelMap::new_empty(config.WINDOW_WIDTH, config.WINDOW_HEIGHT, [0, 0, 0, 0]);
+        GlobalPixelMap::new_empty(cfg.window_width, cfg.window_height, [0, 0, 0, 0]);
 
     let mut grid: HashMap<LogicalPosition<u32>, bool> = HashMap::new();
 
     // Initialise world; fill global data structures
-    for y in 0..config.WINDOW_HEIGHT {
-        for x in 0..config.WINDOW_WIDTH {
+    for y in 0..cfg.window_height {
+        for x in 0..cfg.window_width {
             let entity = app.world.spawn();
 
             let pos = LogicalPosition::new(x, y);
@@ -109,7 +102,8 @@ async fn run() {
 
         storage.new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
 
-        storage.new_bucket::<(u32, u32)>("grid-size", (config.WINDOW_WIDTH, config.WINDOW_HEIGHT));
+        let (width, height) = (cfg.window_width, cfg.window_height);
+        storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
     }
 
     info!(

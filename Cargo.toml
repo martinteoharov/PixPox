@@ -31,6 +31,9 @@ randomize = "3"
 byteorder = "1"
 getrandom = "0.2"
 line_drawing = "1"
+arrayref = "0.3.6"
+lazy_static = "1.4.0"
+imgui = "0.10.0"
 
 # Local Crates
 pixpox_app = { path = "crates/pixpox_app" }
@@ -38,6 +41,6 @@ pixpox_ecs = { path = "crates/pixpox_ecs" }
 pixpox_physics = { path = "crates/pixpox_physics" }
 pixpox_renderer = { path = "crates/pixpox_renderer" }
 pixpox_utils = { path = "crates/pixpox_utils" }
-arrayref = "0.3.6"
-lazy_static = "1.4.0"
-imgui = "0.10.0"
+
+[dependencies.confy]
+version = "0.5.1"

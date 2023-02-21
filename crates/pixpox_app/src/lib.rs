@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use serde_derive::{Deserialize, Serialize};
+
 use pixpox_renderer::{gui::Gui, wgpu::Texture, Pixels, SurfaceTexture};
 use winit::{
     dpi::{LogicalPosition, LogicalSize},
@@ -15,13 +17,13 @@ use winit_input_helper::WinitInputHelper;
 
 use log::{debug, error, info, warn};
 
-#[derive(Copy, Clone)]
-pub struct AppConfig {
-    pub WINDOW_TITLE: &'static str,
-    pub WINDOW_WIDTH: u32,
-    pub WINDOW_HEIGHT: u32,
-    pub WINDOW_FULLSCREEN: bool,
-    pub DEBUG: bool,
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+pub struct Config {
+    pub window_title: String,
+    pub window_height: u32,
+    pub window_width: u32,
+    pub window_scale: f32,
+    pub window_fullscreen: bool,
 }
 
 pub struct App<'a> {
@@ -35,9 +37,9 @@ pub struct App<'a> {
     quit: bool,
 }
 
-impl <'a> App <'a> {
+impl<'a> App<'a> {
     // Create a new application. Panics if renderer can not be initialized.
-    pub fn new(config: AppConfig) -> App<'a> {
+    pub fn new(config: Config) -> App<'a> {
         // Initialize WGPU logging
         env_logger::init();
 
@@ -48,13 +50,13 @@ impl <'a> App <'a> {
         let input = WinitInputHelper::new();
 
         let window = {
-            let size = LogicalSize::new(config.WINDOW_WIDTH as f64, config.WINDOW_HEIGHT as f64);
+            let size = LogicalSize::new(config.window_width as f64, config.window_height as f64);
             let scaled_size = LogicalSize::new(
-                config.WINDOW_WIDTH as f64 * 2.0,
-                config.WINDOW_HEIGHT as f64 * 2.0,
+                config.window_width as f32 * config.window_scale,
+                config.window_height as f32 * config.window_scale,
             );
             WindowBuilder::new()
-                .with_title(config.WINDOW_TITLE)
+                .with_title(config.window_title)
                 .with_inner_size(scaled_size)
                 .with_min_inner_size(size)
                 .build(&event_loop)
@@ -66,7 +68,7 @@ impl <'a> App <'a> {
             let surface_texture =
                 SurfaceTexture::new(window_size.width, window_size.height, &window);
 
-            match Pixels::new(config.WINDOW_WIDTH, config.WINDOW_HEIGHT, surface_texture) {
+            match Pixels::new(config.window_width, config.window_height, surface_texture) {
                 Ok(v) => v,
                 Err(e) => {
                     println!("Could not initialize renderer");
@@ -75,7 +77,7 @@ impl <'a> App <'a> {
             }
         };
 
-        let mut gui = Gui::new(&window, &pixels);
+        let gui = Gui::new(&window, &pixels);
 
         Self {
             world,
@@ -123,7 +125,7 @@ impl <'a> App <'a> {
                 //     return;
                 // }
 
-                let render_result = self.pixels.render_with(|encoder, render_target, context| {
+                let _render_result = self.pixels.render_with(|encoder, render_target, context| {
                     // Render the world texture
                     context.scaling_renderer.render(encoder, render_target);
 
