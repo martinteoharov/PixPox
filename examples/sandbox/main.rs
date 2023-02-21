@@ -8,6 +8,7 @@ extern crate dotenv;
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
 use std::{collections::HashMap, time::Instant};
 
 use custom_components::Cell;
@@ -17,11 +18,12 @@ use imgui::Ui;
 use log::{debug, error, info};
 use pixpox::pixpox_app::App;
 use pixpox::pixpox_utils;
-use pixpox_app::{Config};
+use pixpox_app::Config;
 use pixpox_ecs::entity::Entity;
 use pixpox_ecs::Run;
 use pixpox_ecs::{world, Texture};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::Stats;
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 
@@ -37,38 +39,17 @@ fn show_metrics(ui: &mut Ui, state: &mut bool) {
 }
 
 async fn run() {
-    let cfg: Config = confy::load_path("./examples/sandbox/AppConfig.toml").expect("Could not load config.");
+    let cfg: Config =
+        confy::load_path("./examples/sandbox/AppConfig.toml").expect("Could not load config.");
 
     dbg!(cfg.clone());
     let mut app = App::new(cfg.clone());
-
 
     let now = Instant::now();
     let mut entities_count = 0;
     let mut rng = rand::thread_rng();
 
-    // Define UI Callbacks and States
-    let mut show_metrics_state = &mut false;
-    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool| {
-        ui.show_metrics_window(state);
-    };
-
-    let mut show_about_state = &mut true;
-    let mut show_about_closure = |ui: &mut Ui, state: &mut bool| {
-        ui.show_about_window(state);
-    };
-    
-
-    // ui.show_about_window(&mut self.about_open);
-
-    // Setup GUI
-    app.gui.register_parent("Help");
-
-    let mut performance_metrics = GuiChild::new("Performance Metrics", &mut show_metrics_closure, show_metrics_state);
-    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
-
-    app.gui.register_child("Help", &mut about);
-    app.gui.register_child("Help", &mut performance_metrics);
+    let mut clear_clicked = false;
 
     // Define global data structures
     let global_pixel_map =
@@ -94,7 +75,46 @@ async fn run() {
         }
     }
 
-    // Lock storage
+    // Define UI Callbacks and States
+    let mut show_metrics_state = &mut false;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.show_metrics_window(state);
+        ui.window("Sandbox Performance (World)")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                ui.text("entities: ".to_owned() + &entities_count.to_string());
+
+                for s in stats.get_formatted_stats().iter() {
+                    info!("{}", s);
+                    ui.text(s);
+                };
+            });
+    };
+
+    let mut show_about_state = &mut true;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui
+        .register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui
+        .register_child("Debug", &mut performance_metrics);
+
+    // write storage
     {
         let mut storage = app.world.storage.write().unwrap();
 
@@ -112,7 +132,8 @@ async fn run() {
         now.elapsed().as_secs_f32().to_string()
     );
 
-    app.run::<GlobalPixelMap>().await;
+    app.run::<GlobalPixelMap>()
+        .await;
 }
 
 #[derive(Debug)]

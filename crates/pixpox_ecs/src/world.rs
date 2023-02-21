@@ -13,6 +13,7 @@ use std::{
 };
 
 use log::{debug, error, info};
+use pixpox_utils::stats::Stats;
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator, IntoParallelRefIterator};
 
 use crate::{
@@ -54,8 +55,9 @@ pub struct World {
     pub entities: EntityManager,
     pub component_vecs: Vec<Box<dyn ComponentVec + Send>>,
     pub storage: RwLock<Storage>,
-    pub change_tick: time::Instant,
-    pub last_change_tick: time::Instant,
+    pub last_update: time::Instant,
+    pub stats: Stats
+
 }
 
 impl World {
@@ -75,9 +77,9 @@ impl World {
                 .expect("More PixPox worlds have been created than currently supported."),
             entities,
             component_vecs,
-            change_tick: time::Instant::now(),
-            last_change_tick: time::Instant::now(),
+            last_update: time::Instant::now(),
             storage: RwLock::new(Storage::new()),
+            stats: Stats::new()
         }
     }
 
@@ -183,39 +185,26 @@ impl World {
     }
 
     pub fn run(&mut self) {
-        let now = Instant::now();
+        self.stats.new_tick();
 
+        let now = Instant::now();
         for component_vec in self.component_vecs.iter_mut() {
             component_vec.run_all(&mut self.storage);
         }
+        let elapsed = Instant::now() - now;
+        self.stats.update_sector("run()", elapsed.as_secs_f32());
 
-        info!(
-            "Run all components: {} seconds",
-            now.elapsed().as_secs_f32().to_string()
-        );
-        let now_update = Instant::now();
-
+        let now = Instant::now();
         for component_vec in self.component_vecs.iter_mut() {
             component_vec.update_all(&mut self.storage);
         }
-
-        info!(
-            "Update all components: {} seconds",
-            now_update.elapsed().as_secs_f32().to_string()
-        );
+        let elapsed = Instant::now() - now;
+        self.stats.update_sector("update()", elapsed.as_secs_f32());
     }
 
     fn new_entity(&mut self) -> Entity {
         let entity = self.entities.create();
         let now = Instant::now();
-
-        /*
-               self.component_vecs
-                   .par_iter_mut()
-                   .for_each(|component_vec| {
-                       component_vec.push_none();
-                   });
-        */
 
         for component_vec in self.component_vecs.iter_mut() {
             component_vec.push_none();

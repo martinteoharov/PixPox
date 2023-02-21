@@ -97,13 +97,14 @@ impl<'a> App<'a> {
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
-                // Prepare Dear ImGui
-                self.gui
-                    .prepare(&self.window)
-                    .expect("gui.prepare() failed");
 
                 // Run components
                 self.world.run();
+
+                // info!("FPS: {}", self.world.stats.get_fps());
+                // info!("Average FPS: {}", self.world.stats.get_average_fps());
+                // info!("Mean FPS: {}", self.world.stats.get_mean_fps());
+                
 
                 // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
@@ -125,13 +126,18 @@ impl<'a> App<'a> {
                 //     return;
                 // }
 
+                // Prepare Dear ImGui
+                self.gui
+                    .prepare(&self.window)
+                    .expect("gui.prepare() failed");
+
                 let _render_result = self.pixels.render_with(|encoder, render_target, context| {
                     // Render the world texture
                     context.scaling_renderer.render(encoder, render_target);
 
                     // Render Dear ImGui
                     self.gui
-                        .render(&self.window, encoder, render_target, context)?;
+                        .render(&self.window, encoder, render_target, context, &self.world.stats)?;
 
                     Ok(())
                 });

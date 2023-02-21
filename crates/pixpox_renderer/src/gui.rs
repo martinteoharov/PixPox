@@ -1,4 +1,5 @@
 use imgui::{ProgressBar, Ui};
+use pixpox_utils::Stats;
 
 use crate::{wgpu, Pixels, PixelsContext};
 use std::time::Instant;
@@ -10,12 +11,12 @@ pub struct GuiParent<'a> {
 
 pub struct GuiChild<'a> {
     label: &'static str,
-    cb: &'a mut dyn FnMut(&mut Ui, &mut bool),
+    cb: &'a mut dyn FnMut(&mut Ui, &mut bool, &Stats),
     state: &'a mut bool,
 }
 
 impl<'a> GuiChild<'a> {
-    pub fn new(label: &'static str, cb: &'a mut dyn FnMut(&mut Ui, &mut bool), state: &'a mut bool) -> Self {
+    pub fn new(label: &'static str, cb: &'a mut dyn FnMut(&mut Ui, &mut bool, &Stats), state: &'a mut bool) -> Self {
         Self { label, cb, state }
     }
 }
@@ -99,6 +100,7 @@ impl<'a> Gui<'a> {
         encoder: &mut wgpu::CommandEncoder,
         render_target: &wgpu::TextureView,
         context: &PixelsContext,
+        stats: &Stats
     ) -> imgui_wgpu::RendererResult<()> {
         // Start a new Dear ImGui frame and update the cursor
         let ui = self.imgui.frame();
@@ -123,7 +125,7 @@ impl<'a> Gui<'a> {
         self.gui_entries.iter_mut().for_each(|parent| {
             parent.children.iter_mut().for_each(|child| {
                 if *child.state {
-                    (*child.cb)(ui, &mut *child.state);
+                    (*child.cb)(ui, &mut *child.state, stats);
                 }
             });
         });
