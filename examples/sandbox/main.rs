@@ -23,7 +23,7 @@ use pixpox_ecs::entity::Entity;
 use pixpox_ecs::Run;
 use pixpox_ecs::{world, Texture};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
-use pixpox_utils::Stats;
+use pixpox_utils::{Stats, ConwayGrid};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 
@@ -49,27 +49,25 @@ async fn run() {
     let mut entities_count = 0;
     let mut rng = rand::thread_rng();
 
-    let mut clear_clicked = false;
-
     // Define global data structures
     let global_pixel_map =
         GlobalPixelMap::new_empty(cfg.window_width, cfg.window_height, [0, 0, 0, 0]);
 
-    let mut grid: HashMap<LogicalPosition<u32>, bool> = HashMap::new();
+    let mut optim_grid: ConwayGrid = ConwayGrid::new(cfg.window_width, cfg.window_height, 0.10);
 
     // Initialise world; fill global data structures
     for y in 0..cfg.window_height {
         for x in 0..cfg.window_width {
             let entity = app.world.spawn();
 
-            let pos = LogicalPosition::new(x, y);
+            let pos = (x as i32, y as i32);
             let alive = rng.gen_bool(0.10);
 
             let cell_component = Cell::new(entity.id, pos, alive);
 
             app.world.add_component_to_entity(entity, cell_component);
 
-            grid.insert(pos, alive);
+            optim_grid.set_cell(pos, alive);
 
             entities_count += 1;
         }
@@ -87,7 +85,6 @@ async fn run() {
                 ui.text("entities: ".to_owned() + &entities_count.to_string());
 
                 for s in stats.get_formatted_stats().iter() {
-                    info!("{}", s);
                     ui.text(s);
                 };
             });
@@ -120,7 +117,7 @@ async fn run() {
 
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
 
-        storage.new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
+        storage.new_bucket::<ConwayGrid>("optim_grid", optim_grid);
 
         let (width, height) = (cfg.window_width, cfg.window_height);
         storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
@@ -163,8 +160,8 @@ impl GlobalPixelMap {
         }
     }
 
-    pub fn draw_pos(&mut self, pos: LogicalPosition<u32>, color: [u8; 4]) {
-        let idx = pos.y * self.width + pos.x;
+    pub fn draw_pos(&mut self, pos: (u32, u32), color: [u8; 4]) {
+        let idx = pos.1 * self.width + pos.0;
         self.pixelmap[idx as usize] = color;
     }
 

@@ -101,11 +101,6 @@ impl<'a> App<'a> {
                 // Run components
                 self.world.run();
 
-                // info!("FPS: {}", self.world.stats.get_fps());
-                // info!("Average FPS: {}", self.world.stats.get_average_fps());
-                // info!("Mean FPS: {}", self.world.stats.get_mean_fps());
-                
-
                 // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
 
@@ -120,12 +115,6 @@ impl<'a> App<'a> {
                 // Render Global Pixelmap to frame
                 pixelmap.render(pixels);
 
-                // if let Err(err) = self.pixels.render() {
-                //     error!("pixels.render() failed: {}", err);
-                //     *control_flow = ControlFlow::Exit;
-                //     return;
-                // }
-
                 // Prepare Dear ImGui
                 self.gui
                     .prepare(&self.window)
@@ -136,8 +125,7 @@ impl<'a> App<'a> {
                     context.scaling_renderer.render(encoder, render_target);
 
                     // Render Dear ImGui
-                    self.gui
-                        .render(&self.window, encoder, render_target, context, &self.world.stats)?;
+                    self.gui.render(&self.window, encoder, render_target, context, &self.world.stats)?;
 
                     Ok(())
                 });

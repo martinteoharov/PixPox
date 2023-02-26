@@ -67,7 +67,7 @@ impl<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle>
             width,
             height,
             _pixel_aspect_ratio: 1.0,
-            present_mode: wgpu::PresentMode::Immediate,
+            present_mode: wgpu::PresentMode::AutoVsync,
             surface_texture,
             texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             render_texture_format: None,

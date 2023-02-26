@@ -1,6 +1,9 @@
 pub mod stats;
 pub use stats::Stats;
 
+pub mod CA;
+pub use CA::ConwayGrid;
+
 /// A macro similar to `vec![$elem; $size]` which returns a boxed array.
 ///
 /// ```rustc

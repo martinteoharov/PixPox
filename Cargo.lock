@@ -1572,6 +1572,10 @@ dependencies = [
 [[package]]
 name = "pixpox_utils"
 version = "0.1.0"
+dependencies = [
+ "log",
+ "rand",
+]
 
 [[package]]
 name = "pkg-config"

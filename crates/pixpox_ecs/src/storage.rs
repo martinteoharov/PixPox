@@ -20,6 +20,46 @@ pub enum BucketAction {
     PUT,
 }
 
+/// # Storage
+/// 
+/// Storage is a data structure designed to store global data accessible to all components.
+/// 
+/// It introduces a query system to create and retrieve buckets through a simple-to-use API.
+/// 
+/// To optimize bucket lookup, Storage implements a multi-threaded interner that efficiently stores bucket 
+/// labels and associates them with Spurs. This interner facilitates fast and efficient hashmap lookup.
+/// 
+/// ## Example
+/// 
+/// ```
+/// let mut storage = app.world.storage.write().unwrap();
+/// 
+/// let (width, height) = (cfg.window_width, cfg.window_height);
+/// storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
+/// 
+/// let (width, height) = storage
+///     .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid-size")
+///     .expect("Could not query storage: grid-size");
+
+/// let mut (width, height) = storage
+///     .query_storage_mut::<HashMap<LogicalPosition<u32>, bool>>("grid-size")
+///     .expect("Could not query storage: grid-size");
+/// 
+/// ```
+/// 
+/// ## Panics
+/// 
+/// - If the bucket associated with the given label is not found, `query_storage()` and `query_storage_mut()` 
+/// will panic with an error message.
+/// 
+/// - If the multi-threaded interner fails to recognize a string, `query_storage()` and `query_storage_mut()` 
+/// will panic with an error message.
+/// 
+/// ## Safety
+/// 
+/// - The data stored in the `Storage` is not guaranteed to be thread-safe by default. 
+/// If you need thread-safety, you can use a `RwLock` or a `Mutex` to synchronize access to the `Storage`.
+
 pub struct Storage {
     pub buckets: HashMap<Spur, Box<dyn Any + Send + Sync>>,
     interner: ThreadedRodeo
@@ -35,7 +75,7 @@ impl Storage {
     }
 
     pub fn query_storage<T: 'static>(&self, label: &'static str) -> Option<&T> {
-        let key = &self.interner.get(label).unwrap();
+        let key = &self.interner.get(label).expect("String interner could not find a label");
 
         assert!(
             self.buckets.contains_key(key),
@@ -54,11 +94,11 @@ impl Storage {
     }
 
     pub fn query_storage_mut<T: 'static>(&mut self, label: &'static str) -> Option<&mut T> {
-        let key = &self.interner.get(label).unwrap();
+        let key = &self.interner.get(label).expect("String interner could not find a label");
 
         assert!(
             self.buckets.contains_key(key),
-            "World::query_storage() didn't find an item you were looking for."
+            "World::query_storage_mut() didn't find an item you were looking for."
         );
 
         if let Some(data) = self.buckets.get_mut(key) {
@@ -76,11 +116,11 @@ impl Storage {
         &mut self,
         label: &'static str,
     ) -> Option<&mut T> {
-        let key = &self.interner.get(label).unwrap();
+        let key = &self.interner.get(label).expect("String interner could not find a label");
 
         assert!(
             self.buckets.contains_key(key),
-            "World::query_storage() didn't find an item you were looking for."
+            "World::query_global_pixel_map() didn't find an item you were looking for."
         );
 
         if let Some(data) = self.buckets.get_mut(key) {
