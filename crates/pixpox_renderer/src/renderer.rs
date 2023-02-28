@@ -157,6 +157,7 @@ impl ScalingRenderer {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
+            
             multiview: None,
         });
 
@@ -196,7 +197,7 @@ impl ScalingRenderer {
             self.clip_rect.0,
             self.clip_rect.1,
             self.clip_rect.2,
-            self.clip_rect.3,
+            self.clip_rect.3
         );
         rpass.draw(0..3, 0..1);
     }

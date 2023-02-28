@@ -1,6 +1,5 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
-extern crate arrayref;
 
 pub mod custom_components;
 
@@ -9,21 +8,26 @@ extern crate dotenv;
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
 use std::{collections::HashMap, time::Instant};
 
-use arrayref::array_ref;
 use custom_components::Cell;
 use dotenv::dotenv;
 
+use imgui::Ui;
 use log::{debug, error, info};
 use pixpox::pixpox_app::App;
 use pixpox::pixpox_utils;
-use pixpox_app::AppConfig;
+use pixpox_app::Config;
 use pixpox_ecs::entity::Entity;
-use pixpox_ecs::Run;
 use pixpox_ecs::{world, Texture};
+use pixpox_ecs::{Run, Update};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::{ConwayGrid, Stats};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
+
+use crate::custom_components::ConwayGridComponent;
 
 const WINDOW_TITLE: &str = "pixpox!";
 
@@ -32,60 +36,68 @@ fn main() {
     pollster::block_on(run());
 }
 
+fn show_metrics(ui: &mut Ui, state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
 async fn run() {
-    // TODO: read config from file
-    let config = AppConfig {
-        WINDOW_TITLE: "Conway",
-        WINDOW_HEIGHT: 250,
-        WINDOW_WIDTH: 500,
-        WINDOW_FULLSCREEN: false,
-        DEBUG: true,
+    let cfg: Config =
+        confy::load_path("./examples/conway/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+    let mut app = App::new(cfg.clone());
+
+    // Define global data structures
+    let global_pixel_map =
+        GlobalPixelMap::new_empty(cfg.window_width + 2, cfg.window_height + 2, [0, 0, 0, 0]);
+
+    // Initialise world; fill global data structures
+    let entity = app.world.spawn();
+
+    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.70);
+
+    app.world.add_component_to_entity(entity, grid_component);
+
+    // Define UI Callbacks and States
+    let show_metrics_state = &mut false;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.show_metrics_window(state);
+        ui.window("Sandbox Performance (World)")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                }
+            });
     };
 
-    let mut app = App::new(config);
+    let show_about_state = &mut true;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
 
-    let now = Instant::now();
-    let mut entities_count = 0;
-    let mut rng = rand::thread_rng();
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui.register_parent("Debug");
 
-    let global_pixel_map =
-        GlobalPixelMap::new_empty(config.WINDOW_WIDTH, config.WINDOW_HEIGHT, [0, 0, 0, 0]);
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
 
-    let mut grid: HashMap<LogicalPosition<u32>, bool> = HashMap::new();
+    app.gui.register_child("Help", &mut about);
+    app.gui.register_child("Debug", &mut performance_metrics);
 
-    for y in 0..config.WINDOW_HEIGHT {
-        for x in 0..config.WINDOW_WIDTH {
-            let entity = app.world.spawn();
-
-            let pos = LogicalPosition::new(x, y);
-            let alive = rng.gen_bool(0.10);
-
-            let cell_component = Cell::new(entity.id, pos, alive);
-
-            app.world.add_component_to_entity(entity, cell_component);
-
-            grid.insert(pos, alive);
-
-            entities_count += 1;
-        }
-    }
-
-    // Lock storage
+    // write storage
     {
         let mut storage = app.world.storage.write().unwrap();
 
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
-
-        storage.new_bucket::<HashMap<LogicalPosition<u32>, bool>>("grid", grid);
-
-        storage.new_bucket::<(u32, u32)>("grid-size", (config.WINDOW_WIDTH, config.WINDOW_HEIGHT));
     }
-
-    info!(
-        "Main::run() create {} entities in {} seconds",
-        entities_count,
-        now.elapsed().as_secs_f32().to_string()
-    );
 
     app.run::<GlobalPixelMap>().await;
 }
@@ -117,19 +129,13 @@ impl GlobalPixelMap {
         }
     }
 
-    pub fn clear(&mut self) {
-        for _y in 0..self.height {
-            for _x in 0..self.width {
-                //   let pixel = self.pixelmap.get_mut(&LogicalPosition::new(x, y)).unwrap();
-                //   let color: [u8; 4] = [0, 0, 0, 255];
-                //   pixel.copy_from_slice(&color);
-            }
-        }
+    pub fn draw_pos(&mut self, pos: (u32, u32), color: [u8; 4]) {
+        let idx = pos.1 * self.width + pos.0;
+        self.pixelmap[idx as usize] = color;
     }
 
-    pub fn draw_pos(&mut self, pos: LogicalPosition<u32>, color: [u8; 4]) {
-        let idx = pos.y * self.width + pos.x;
-        self.pixelmap[idx as usize] = color;
+    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
+        std::mem::swap(&mut self.pixelmap, vec);
     }
 
     pub fn run(&self) {}

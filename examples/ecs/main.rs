@@ -40,7 +40,7 @@ fn show_metrics(ui: &mut Ui, state: &mut bool) {
 
 async fn run() {
     let cfg: Config =
-        confy::load_path("./examples/sandbox/AppConfig.toml").expect("Could not load config.");
+        confy::load_path("./examples/ecs/AppConfig.toml").expect("Could not load config.");
 
     dbg!(cfg.clone());
     let mut app = App::new(cfg.clone());

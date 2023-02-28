@@ -473,6 +473,7 @@ impl Pixels {
         // Update the pixel buffer texture view
         let bytes_per_row =
             (self.context.texture_extent.width as f32 * self.context.texture_format_size) as u32;
+
         self.context.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &self.context.texture,
