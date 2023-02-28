@@ -17,7 +17,6 @@ impl ConwayGrid {
         let mut rng = rand::thread_rng();
         let mut cells: Vec<bool> = Vec::new();
 
-        // Create a layer of 0s
         for _ in 0..height {
             for _ in 0..width {
                 let alive = rng.gen_bool(gen_chance);

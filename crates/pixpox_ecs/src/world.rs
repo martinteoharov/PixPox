@@ -7,14 +7,19 @@ use std::{
     borrow::BorrowMut,
     cell::{RefCell, RefMut},
     collections::HashMap,
-    sync::{atomic::{AtomicU32, AtomicUsize, Ordering}, Mutex, Arc, RwLock},
+    sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
+    },
     thread,
     time::{self, Duration, Instant},
 };
 
 use log::{debug, error, info};
 use pixpox_utils::stats::Stats;
-use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator, IntoParallelRefIterator};
+use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use winit::event::VirtualKeyCode;
+use winit_input_helper::WinitInputHelper;
 
 use crate::{
     component::{self},
@@ -56,8 +61,9 @@ pub struct World {
     pub component_vecs: Vec<Box<dyn ComponentVec + Send>>,
     pub storage: RwLock<Storage>,
     pub last_update: time::Instant,
-    pub stats: Stats
-
+    pub stats: Stats,
+    pub input: WinitInputHelper,
+    paused: bool,
 }
 
 impl World {
@@ -79,7 +85,9 @@ impl World {
             component_vecs,
             last_update: time::Instant::now(),
             storage: RwLock::new(Storage::new()),
-            stats: Stats::new()
+            stats: Stats::new(),
+            input: WinitInputHelper::new(),
+            paused: false,
         }
     }
 
@@ -87,7 +95,9 @@ impl World {
         self.new_entity()
     }
 
-    pub fn add_component_to_entity<ComponentType: 'static + Label + Run + Update + Clone + Send + Sync>(
+    pub fn add_component_to_entity<
+        ComponentType: 'static + Label + Run + Update + Clone + Send + Sync,
+    >(
         &mut self,
         entity: Entity,
         mut component: ComponentType,
@@ -183,9 +193,27 @@ impl World {
 
         return None;
     }
+    pub fn toggle_paused(&mut self) {
+        self.paused = !self.paused;
+    }
+
+    pub fn handle_input(&mut self) {
+        /*
+        if self.input.key_pressed(VirtualKeyCode::P) {
+            info!("Toggled world");
+            self.toggle_paused();
+        }
+         */
+    }
 
     pub fn run(&mut self) {
         self.stats.new_tick();
+
+        if self.paused {
+            return;
+        }
+
+        self.handle_input();
 
         let now = Instant::now();
         for component_vec in self.component_vecs.iter_mut() {
@@ -196,7 +224,7 @@ impl World {
 
         let now = Instant::now();
         for component_vec in self.component_vecs.iter_mut() {
-            component_vec.update_all(&mut self.storage);
+            component_vec.update_all(&mut self.storage, &mut self.input);
         }
         let elapsed = Instant::now() - now;
         self.stats.update_sector("update()", elapsed.as_secs_f32());
@@ -228,7 +256,7 @@ pub trait ComponentVec: Send + Sync {
     fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
     fn push_none(&mut self);
     fn run_all(&mut self, storage: &RwLock<Storage>);
-    fn update_all(&mut self, storage: &mut RwLock<Storage>);
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut WinitInputHelper);
 }
 
 impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
@@ -252,10 +280,10 @@ impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
         })
     }
 
-    fn update_all(&mut self, storage: &mut RwLock<Storage>) {
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut WinitInputHelper) {
         self.par_iter_mut().for_each(|component| {
             if let Some(c) = component {
-                c.update(&storage);
+                c.update(&storage, input);
             }
         })
     }

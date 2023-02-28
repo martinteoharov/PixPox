@@ -19,15 +19,17 @@ use pixpox::pixpox_app::App;
 use pixpox::pixpox_utils;
 use pixpox_app::Config;
 use pixpox_ecs::entity::Entity;
-use pixpox_ecs::{world, Texture};
+use pixpox_ecs::{world, Texture, World};
 use pixpox_ecs::{Run, Update};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::CA::cell_realm::CellRealm;
 use pixpox_utils::{conway::ConwayGrid, Stats};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
+use winit::event::{DeviceEvent, Event, MouseButton, VirtualKeyCode};
 use winit_input_helper::WinitInputHelper;
 
-use crate::custom_components::ConwayGridComponent;
+use crate::custom_components::CellRealmComponent;
 
 const WINDOW_TITLE: &str = "pixpox!";
 
@@ -42,7 +44,7 @@ fn show_metrics(ui: &mut Ui, state: &mut bool) {
 
 async fn run() {
     let cfg: Config =
-        confy::load_path("./examples/conway/AppConfig.toml").expect("Could not load config.");
+        confy::load_path("./examples/physics-ca/AppConfig.toml").expect("Could not load config.");
 
     dbg!(cfg.clone());
 
@@ -55,11 +57,11 @@ async fn run() {
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
 
-    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.70);
+    let grid_component = CellRealmComponent::new(cfg.window_height, cfg.window_width);
 
     app.world.add_component_to_entity(entity, grid_component);
 
-    // Define UI Callbacks and States
+    // Define GUI Callbacks and States
     let show_metrics_state = &mut false;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
         ui.show_metrics_window(state);
@@ -93,22 +95,14 @@ async fn run() {
     app.gui.register_child("Help", &mut about);
     app.gui.register_child("Debug", &mut performance_metrics);
 
-    // write storage
+    // Get write lock for storage
     {
         let mut storage = app.world.storage.write().unwrap();
 
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
     }
 
-    let mut callback = |event: &winit::event::Event<()>| {
-        let mut input = WinitInputHelper::new();
-
-        if input.update(&event) {
-            // Close events
-        }
-    };
-
-    app.run::<GlobalPixelMap>(&mut callback).await;
+    app.run::<GlobalPixelMap>().await;
 }
 
 #[derive(Debug)]

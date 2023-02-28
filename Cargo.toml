@@ -34,6 +34,7 @@ line_drawing = "1"
 arrayref = "0.3.6"
 lazy_static = "1.4.0"
 imgui = "0.10.0"
+winit_input_helper = "0.13.0"
 
 # Local Crates
 pixpox_app = { path = "crates/pixpox_app" }

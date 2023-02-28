@@ -1,5 +1,7 @@
 use std::sync::RwLock;
 
+use winit_input_helper::WinitInputHelper;
+
 use crate::Storage;
 
 /// The Label trait is used to give a human-readable label to an ECS component.
@@ -68,7 +70,7 @@ pub trait Run {
 /// }
 /// ```
 pub trait Update {
-    fn update(&mut self, storage: &RwLock<Storage>);
+    fn update(&mut self, storage: &RwLock<Storage>, input: &WinitInputHelper);
 }
 
 /// The Texture trait defines how a component should be rendered.

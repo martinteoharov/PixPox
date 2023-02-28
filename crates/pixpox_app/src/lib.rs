@@ -97,7 +97,6 @@ impl<'a> App<'a> {
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
-
                 // Run components
                 self.world.run();
 
@@ -125,7 +124,13 @@ impl<'a> App<'a> {
                     context.scaling_renderer.render(encoder, render_target);
 
                     // Render Dear ImGui
-                    self.gui.render(&self.window, encoder, render_target, context, &self.world.stats)?;
+                    self.gui.render(
+                        &self.window,
+                        encoder,
+                        render_target,
+                        context,
+                        &self.world.stats,
+                    )?;
 
                     Ok(())
                 });
@@ -133,6 +138,9 @@ impl<'a> App<'a> {
 
             // Handle input events
             self.gui.handle_event(&self.window, &event);
+            let mut mouse_cell: (isize, isize) = (0, 0);
+            let mut mouse_prev_cell: (isize, isize) = (0, 0);
+
             // For everything else, for let winit_input_helper collect events to build its state.
             // It returns `true` when it is time to update our game state and request a redraw.
             if self.input.update(&event) {
@@ -141,16 +149,15 @@ impl<'a> App<'a> {
                     *control_flow = ControlFlow::Exit;
                     return;
                 }
-                if self.input.key_pressed(VirtualKeyCode::P) {
-                    self.paused = !self.paused;
-                }
+
                 if self.input.key_pressed_os(VirtualKeyCode::Space) {
                     // Space is frame-step, so ensure we're paused
                     self.paused = true;
                 }
+
                 // Handle mouse. This is a bit involved since support some simple
                 // line drawing (mostly because it makes nice looking patterns).
-                let (mouse_cell, mouse_prev_cell) = self
+                (mouse_cell, mouse_prev_cell) = self
                     .input
                     .mouse()
                     .map(|(mx, my)| {
@@ -187,6 +194,8 @@ impl<'a> App<'a> {
 
                 self.window.request_redraw();
             }
+
+            self.world.input.update(&event);
         });
     }
 }
