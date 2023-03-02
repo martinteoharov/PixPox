@@ -108,7 +108,7 @@ async fn run() {
         }
     };
 
-    app.run::<GlobalPixelMap>(&mut callback).await;
+    app.run::<GlobalPixelMap>().await;
 }
 
 #[derive(Debug)]

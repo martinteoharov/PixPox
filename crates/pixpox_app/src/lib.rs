@@ -195,7 +195,7 @@ impl<'a> App<'a> {
                 self.window.request_redraw();
             }
 
-            self.world.input.update(&event);
+            self.world.input.update(&event, mouse_cell, mouse_prev_cell);
         });
     }
 }

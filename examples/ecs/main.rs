@@ -23,7 +23,7 @@ use pixpox_ecs::entity::Entity;
 use pixpox_ecs::Run;
 use pixpox_ecs::{world, Texture};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
-use pixpox_utils::{Stats, ConwayGrid};
+use pixpox_utils::{Stats, conway::ConwayGrid};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 

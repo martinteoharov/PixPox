@@ -1,13 +1,15 @@
 use std::{collections::HashMap, sync::RwLock};
 
+use imgui::InputFloat2;
 use log::{debug, error};
 use pixpox_app::App;
 use pixpox_ecs::{
     entity::{self, Entity},
-    Label, Run, Storage, Texture, Update, World,
+    Label, Run, Storage, Texture, Update, World, InputHandler,
 };
-use pixpox_utils::ConwayGrid;
+use pixpox_utils::conway::ConwayGrid;
 use winit::dpi::{LogicalPosition, Position};
+use winit_input_helper::WinitInputHelper;
 
 use crate::GlobalPixelMap;
 
@@ -86,7 +88,7 @@ impl Run for Cell {
 }
 
 impl Update for Cell {
-    fn update(&mut self, rw_storage: &RwLock<Storage>) {
+    fn update(&mut self, rw_storage: &RwLock<Storage>, input: &InputHandler) {
         if self.change {
             let mut storage = rw_storage.write().unwrap();
 

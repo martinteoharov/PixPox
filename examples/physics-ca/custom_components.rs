@@ -4,10 +4,16 @@ use log::{debug, error, info};
 use pixpox_app::App;
 use pixpox_ecs::{
     entity::{self, Entity},
-    Label, Run, Storage, Texture, Update, World,
+    Label, Run, Storage, Texture, Update, World, InputHandler,
 };
-use pixpox_utils::{conway::ConwayGrid, CA::cell_realm::CellRealm};
-use winit::{dpi::{LogicalPosition, Position}, event::VirtualKeyCode};
+use pixpox_utils::{
+    conway::ConwayGrid,
+    CA::cell_realm::{CellRealm, CellType},
+};
+use winit::{
+    dpi::{LogicalPosition, Position},
+    event::VirtualKeyCode,
+};
 use winit_input_helper::WinitInputHelper;
 
 use crate::GlobalPixelMap;
@@ -15,31 +21,44 @@ use crate::GlobalPixelMap;
 #[derive(Clone)]
 pub struct CellRealmComponent {
     inner: CellRealm,
-    paused: bool
+    paused: bool,
 }
 
 impl CellRealmComponent {
     pub fn new(height: u32, width: u32) -> Self {
         Self {
             inner: CellRealm::new(height, width),
-            paused: false
+            paused: false,
         }
     }
 }
 
 impl Run for CellRealmComponent {
     fn run(&mut self, _storage: &pixpox_ecs::Storage) {
-        self.inner.next_state();
+        if !self.paused {
+            self.inner.next_state();
+        }
     }
 }
 
 impl Update for CellRealmComponent {
-    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &WinitInputHelper) {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
         let mut storage = storage.write().unwrap();
 
-        if input.key_pressed(VirtualKeyCode::P) {
+        if input.winit.key_pressed(VirtualKeyCode::P) {
             info!("Toggled world");
             self.paused = !self.paused;
+        }
+
+        if input.winit.mouse_held(0) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
+            self.inner.set_line(input.mouse, input.mouse_prev, CellType::WATER)
+        }
+
+        if input.winit.mouse_held(1) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse_prev.1);
+
+            self.inner.set_line(input.mouse, input.mouse_prev, CellType::STONE);
         }
 
         // Fetch PixelMap

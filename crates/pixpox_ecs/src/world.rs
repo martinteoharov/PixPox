@@ -18,7 +18,7 @@ use std::{
 use log::{debug, error, info};
 use pixpox_utils::stats::Stats;
 use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
-use winit::event::VirtualKeyCode;
+use winit::event::{VirtualKeyCode, Event};
 use winit_input_helper::WinitInputHelper;
 
 use crate::{
@@ -54,6 +54,28 @@ pub enum BucketAction {
     PUT,
 }
 
+pub struct InputHandler {
+    pub winit: WinitInputHelper,
+    pub mouse: (isize, isize),
+    pub mouse_prev: (isize, isize)
+}
+
+impl InputHandler {
+    pub fn new() -> Self {
+        Self {
+            winit: WinitInputHelper::new(),
+            mouse: (0, 0),
+            mouse_prev: (0, 0)
+        }
+    }
+
+    pub fn update(&mut self, event: &Event<()>, mouse_pos: (isize, isize), prev_mouse_pos: (isize, isize)) {
+        self.winit.update(event);
+        self.mouse = mouse_pos;
+        self.mouse_prev = prev_mouse_pos;
+    }
+}
+
 // TODO: Add a field for tick speed
 pub struct World {
     id: WorldId,
@@ -62,7 +84,7 @@ pub struct World {
     pub storage: RwLock<Storage>,
     pub last_update: time::Instant,
     pub stats: Stats,
-    pub input: WinitInputHelper,
+    pub input: InputHandler,
     paused: bool,
 }
 
@@ -86,7 +108,7 @@ impl World {
             last_update: time::Instant::now(),
             storage: RwLock::new(Storage::new()),
             stats: Stats::new(),
-            input: WinitInputHelper::new(),
+            input: InputHandler::new(),
             paused: false,
         }
     }
@@ -256,7 +278,7 @@ pub trait ComponentVec: Send + Sync {
     fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
     fn push_none(&mut self);
     fn run_all(&mut self, storage: &RwLock<Storage>);
-    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut WinitInputHelper);
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler);
 }
 
 impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
@@ -280,7 +302,7 @@ impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
         })
     }
 
-    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut WinitInputHelper) {
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler) {
         self.par_iter_mut().for_each(|component| {
             if let Some(c) = component {
                 c.update(&storage, input);

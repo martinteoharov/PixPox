@@ -76,6 +76,18 @@ async fn run() {
             });
     };
 
+    let show_ca_state = &mut false;
+    let mut show_ca_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.window("Tool Selection")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                ui.button("water").then(|| {
+                });
+            });
+    };
+
     let show_about_state = &mut true;
     let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
         ui.show_about_window(state);
@@ -100,6 +112,8 @@ async fn run() {
         let mut storage = app.world.storage.write().unwrap();
 
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+
+        storage.new_bucket::<usize>("selected-tool", 0);
     }
 
     app.run::<GlobalPixelMap>().await;

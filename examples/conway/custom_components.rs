@@ -4,10 +4,11 @@ use log::{debug, error};
 use pixpox_app::App;
 use pixpox_ecs::{
     entity::{self, Entity},
-    Label, Run, Storage, Texture, Update, World,
+    Label, Run, Storage, Texture, Update, World, InputHandler,
 };
 use pixpox_utils::conway::ConwayGrid;
 use winit::dpi::{LogicalPosition, Position};
+use winit_input_helper::WinitInputHelper;
 
 use crate::GlobalPixelMap;
 
@@ -31,7 +32,7 @@ impl Run for ConwayGridComponent {
 }
 
 impl Update for ConwayGridComponent {
-    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>) {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
         let mut storage = storage.write().unwrap();
 
         // Fetch PixelMap

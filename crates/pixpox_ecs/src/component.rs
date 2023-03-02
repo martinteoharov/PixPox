@@ -2,7 +2,7 @@ use std::sync::RwLock;
 
 use winit_input_helper::WinitInputHelper;
 
-use crate::Storage;
+use crate::{Storage, InputHandler};
 
 /// The Label trait is used to give a human-readable label to an ECS component.
 /// Every component must implement this trait in order to be used with the PixPox game engine.
@@ -70,7 +70,7 @@ pub trait Run {
 /// }
 /// ```
 pub trait Update {
-    fn update(&mut self, storage: &RwLock<Storage>, input: &WinitInputHelper);
+    fn update(&mut self, storage: &RwLock<Storage>, input: &InputHandler);
 }
 
 /// The Texture trait defines how a component should be rendered.
