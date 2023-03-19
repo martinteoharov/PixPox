@@ -2,8 +2,6 @@
 
 <img src="https://user-images.githubusercontent.com/43793073/226184478-050c80a2-c5d8-432e-bc5a-28d562017b72.png" alt="Image" width="200" height="200">
 
-
-
 PixPox is a 2D pixel game engine designed for game developers who want to create dynamic and engaging games. The engine incorporates advanced cellular automata capabilities, providing developers with a flexible and powerful toolset for creating natural-looking game environments.
 
 ## Features
