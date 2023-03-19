@@ -1,21 +1,3 @@
-# PixPox
-PixPox is a 2D Modular Game Engine built around the concept of simulating every pixel on screen using simple [Cellular Automaton](https://en.wikipedia.org/wiki/Cellular_automaton) rules. 
-
-The physics computation is done on the GPU using compute shaders to achieve real time pixel simulation. 
-The game engine will feature all kinds of different materials and effects, like:
-- fire
-- water
-- sand
-- air
-- explosions
-- wood, stone, iron
-- rust
-
-These materials will be able to interact with each other using cellular automaton rules. For a simple example - water flows and fire spreads, water puts out fire and fire burns wood, etc. 
-
-
-TODO:
-
 # PixPox - 2D Pixel Game Engine with advanced Cellular Automata Capabilities
 
 PixPox is a 2D pixel game engine designed for game developers who want to create dynamic and engaging games. The engine incorporates advanced cellular automata capabilities, providing developers with a flexible and powerful toolset for creating natural-looking game environments.
@@ -28,6 +10,8 @@ PixPox is a 2D pixel game engine designed for game developers who want to create
 - Lightweight and optimized for performance.
 
 ## Getting Started
+
+A good place to start learning how to use PixPox is the devdocs, which showcase the engine's architecture. You can access the devdocs [here](https://martinteoharov.github.io/pixpox-dev-docs/).
 
 ### Examples
 PixPox comes with several example projects to demonstrate the engine's capabilities.
@@ -43,7 +27,4 @@ We welcome contributions from developers who are interested in improving the eng
 PixPox is licensed under the MIT License. See the LICENSE file for details.
 
 ### Credits
-PixPox was developed by Martin Teoharov as a final year project at (The university of Surrey)[[https://www.surrey.ac.uk/]]. The project was supervised by [Supervisor's Name].
-
-
-
+PixPox was developed by Martin Teoharov as a final year project at [The university of Surrey](https://www.surrey.ac.uk/). The project was supervised by Dr. Tom Thorne.
