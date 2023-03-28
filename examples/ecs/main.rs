@@ -60,7 +60,7 @@ async fn run() {
         for x in 0..cfg.window_width {
             let entity = app.world.spawn();
 
-            let pos = (x as i32, y as i32);
+            let pos = (x as isize, y as isize);
             let alive = rng.gen_bool(0.10);
 
             let cell_component = Cell::new(entity.id, pos, alive);
@@ -77,7 +77,7 @@ async fn run() {
     let mut show_metrics_state = &mut false;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
         ui.show_metrics_window(state);
-        ui.window("Sandbox Performance (World)")
+        ui.window("ECS Performance (World)")
             .position([60.0, 390.0], imgui::Condition::Once)
             .size([400.0, 300.0], imgui::Condition::FirstUseEver)
             .collapsible(true)

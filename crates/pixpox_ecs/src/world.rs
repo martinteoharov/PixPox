@@ -228,7 +228,7 @@ impl World {
          */
     }
 
-    pub fn run(&mut self) {
+    pub fn run<T: 'static + Texture>(&mut self) {
         self.stats.new_tick();
 
         if self.paused {
@@ -248,6 +248,10 @@ impl World {
         for component_vec in self.component_vecs.iter_mut() {
             component_vec.update_all(&mut self.storage, &mut self.input);
         }
+        let mut storage = self.storage.write().expect("Could not lock storage");
+        storage.update_global_pixel_map::<T>(&self.input);
+
+    
         let elapsed = Instant::now() - now;
         self.stats.update_sector("update()", elapsed.as_secs_f32());
     }

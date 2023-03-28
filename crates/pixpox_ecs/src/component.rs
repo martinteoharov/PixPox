@@ -96,5 +96,6 @@ pub trait Update {
 /// ```
 pub trait Texture {
     fn render(&self, pixels: &mut [u8]);
+    fn update(&mut self, input: &InputHandler);
     fn size(&self) -> (u32, u32);
 }

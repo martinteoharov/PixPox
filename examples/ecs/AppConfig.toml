@@ -1,5 +1,5 @@
-window_title = "Sandbox"
-window_height = 320
+window_title = "ECS"
+window_height = 420
 window_width = 521
-window_scale = 2.0
+window_scale = 3.0
 window_fullscreen = false

@@ -1,13 +1,55 @@
-Meeting 1 things to discuss:
+---
+# Meeting 1
 
+Things to discuss:
 - https://martinteoharov.github.io/pixpox-dev-docs/ is this format ok?
 - Compute shaders or CPU computation to begin with
 - How to research cellular automata
 
 
 Deadline: Week 7 probably
------------------------------------
 
-Meeting 2 
+---
+# Meeting 2 
 
 April sometime (surreylearn)
+
+
+---
+# Meeting 3
+
+To ask:
+
+- Sage HDR? Should I submit it somewhere or keep it?
+
+Progress made on:
+- Storage system
+ - query API
+ - multithreading
+   - rwlocks
+   - run() and update() philosophy
+ - multi-threaded string interner (storing one copy of each distinct string)
+- Handling input
+ - struct to represent input (mouse pos, previous mouse pos, etc)
+ - offloading input for components to interpret
+- GUI
+ - Simple GUI API with callbacks
+- Performance measures and documentation
+- A little bit of progress on the report / pixpox-dev-docs
+- Conway
+
+
+Currently working on:
+- Simulating physics with cellular automata
+ - fluids
+ - fire
+ - rust
+
+Things to discuss:
+- should I continue on the game dev / design pattern path or go more towards cellular automata
+- details for the interim report
+
+
+
+
+

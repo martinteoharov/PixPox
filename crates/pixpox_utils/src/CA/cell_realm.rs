@@ -5,10 +5,6 @@ use rayon::prelude::{
 };
 use std::collections::HashMap;
 
-const MAX_MASS: f64 = 1.0;
-const MAX_COMPRESS: f64 = 0.02;
-const MIN_MASS: f64 = 0.0001;
-
 #[derive(Copy, Clone, PartialEq)]
 pub enum CellType {
     WATER,
@@ -21,28 +17,17 @@ pub enum CellType {
 #[derive(Copy, Clone)]
 pub struct Cell {
     cell_type: CellType,
-    mass: f64,
+    flow: Option<(i32, i32)>,
 }
 
 impl Cell {
-    pub fn new(cell_type: CellType) -> Self {
-        let mass = match cell_type {
-            CellType::WATER => 0.5,
-            CellType::FIRE => 0.0,
-            CellType::STONE => 1.0,
-            CellType::WOOD => 1.0,
-            CellType::EMPTY => 0.0,
-        };
-
-        Self { cell_type, mass }
+    pub fn new(cell_type: CellType, flow: Option<(i32, i32)>) -> Self {
+        Self { cell_type, flow }
     }
 
     pub fn get_color(&self) -> [u8; 4] {
         match self.cell_type {
-            CellType::WATER => {
-                let b = std::cmp::min((255.0 * self.mass) as usize, 255) as u8;
-                [0, 0, b, 255]
-            },
+            CellType::WATER => [0, 0, 200, 255],
             CellType::FIRE => [255, 0, 0, 0],
             CellType::STONE => [100, 100, 100, 255],
             CellType::WOOD => [139, 69, 19, 255],
@@ -50,77 +35,50 @@ impl Cell {
         }
     }
 
-    fn calculate_flow_outgoing(&self, source_cell: &mut Cell, target_cell: Cell) -> (Cell, Cell) {
-        match source_cell.cell_type {
-            CellType::WATER => {
-                let max_fill = MAX_MASS - target_cell.mass;
-                let diff = max_fill.min(source_cell.mass);
-                source_cell.mass -= diff;
-
-                // error!("mass: {}", source_cell.mass);
-
-                (*source_cell, target_cell)
-            },
-            CellType::FIRE => (*source_cell, target_cell),
-            CellType::STONE => (*source_cell, target_cell),
-            CellType::WOOD => (*source_cell, target_cell),
-            CellType::EMPTY => (*source_cell, target_cell),
-        }
-    }
-
-    fn calculate_flow_incoming(&self, source_cell: Cell, target_cell: &mut Cell) -> (Cell, Cell) {
-        match target_cell.cell_type {
-            CellType::WATER => {
-                let max_fill = MAX_MASS - target_cell.mass;
-                let diff = max_fill.min(source_cell.mass);
-                target_cell.mass += diff;
-
-                (source_cell, *target_cell)
-            },
-            CellType::FIRE => (source_cell, *target_cell),
-            CellType::STONE => (source_cell, *target_cell),
-            CellType::WOOD => (source_cell, *target_cell),
-            CellType::EMPTY => {
-                target_cell.cell_type = CellType::WATER;
-                let max_fill = MAX_MASS - target_cell.mass;
-                let diff = max_fill.min(source_cell.mass);
-                target_cell.mass += diff;
-
-                (source_cell, *target_cell)
-            },
-        }
-    }
-
     pub fn next_state(&self, n: Vec<Cell>) -> Cell {
         match self.cell_type {
             CellType::WATER => {
-                let mut cell = Cell::new(self.cell_type);
+                if n[6].cell_type == CellType::EMPTY {
+                    return Cell::new(CellType::EMPTY, Some((0, 1)));
+                }
 
-                // Calculate outgoing flow
-                self.calculate_flow_outgoing(&mut cell, n[6]); // cell below
-                self.calculate_flow_outgoing(&mut cell, n[4]); // cell right
-                self.calculate_flow_outgoing(&mut cell, n[3]); // cell right
+                // If both left and right are empty
+                if n[3].cell_type == CellType::EMPTY && n[4].cell_type == CellType::EMPTY {
+                    let mut rng = rand::thread_rng();
+                    let flow_x = if rng.gen_bool(0.5) { 1 } else { -1 };
+                    return Cell::new(CellType::EMPTY, Some((flow_x, 0)));
+                }
 
-                // Calculate incoming flow
-                self.calculate_flow_incoming(n[1], &mut cell); // cell above
-                self.calculate_flow_incoming(n[3], &mut cell); // cell left
-                self.calculate_flow_incoming(n[4], &mut cell); // cell left
+                if n[3].cell_type == CellType::WATER && n[4].cell_type == CellType::EMPTY {
+                    return Cell::new(CellType::EMPTY, Some((1, 0)));
+                }
 
+                if n[3].cell_type == CellType::EMPTY && n[4].cell_type == CellType::WATER {
+                    return Cell::new(CellType::EMPTY, Some((-1, 0)));
+                }
 
-                cell
+                Cell::new(CellType::WATER, Some((0, 0)))
             },
-            CellType::FIRE => Cell::new(CellType::FIRE),
-            CellType::STONE => Cell::new(CellType::STONE),
-            CellType::WOOD => Cell::new(CellType::WOOD),
+            CellType::FIRE => Cell::new(CellType::FIRE, Some((0, 0))),
+            CellType::STONE => Cell::new(CellType::STONE, Some((0, 0))),
+            CellType::WOOD => Cell::new(CellType::WOOD, Some((0, 0))),
             CellType::EMPTY => {
-                let mut cell = Cell::new(self.cell_type);
+                // Above
+                if n[1].flow.unwrap().1 > 0 {
+                    return Cell::new(CellType::WATER, Some((0, 0)));
+                }
 
-                // Calculate incoming flow
-                self.calculate_flow_incoming(n[1], &mut cell); // cell above
-                self.calculate_flow_incoming(n[3], &mut cell); // cell left
-                self.calculate_flow_incoming(n[4], &mut cell); // cell right
+                // Left
+                if n[3].flow.unwrap().0 > 0 {
+                    return Cell::new(CellType::WATER, Some((0, 0)));
+                }
 
-                cell
+                // Right
+                if n[4].flow.unwrap().0 < 0 {
+                    return Cell::new(CellType::WATER, Some((0, 0)));
+                }
+
+                Cell::new(CellType::EMPTY, Some((0, 0)))
             },
         }
     }
@@ -140,7 +98,7 @@ impl CellRealm {
 
         for _ in 0..height {
             for _ in 0..width {
-                let cell = Cell::new(CellType::EMPTY);
+                let cell = Cell::new(CellType::EMPTY, None);
                 cells.push(cell);
             }
         }
@@ -168,7 +126,7 @@ impl CellRealm {
 
     pub fn set_pos(&mut self, pos: (isize, isize), cell: CellType) {
         let idx = self.get_idx(pos);
-        self.cells[idx] = Cell::new(cell);
+        self.cells[idx] = Cell::new(cell, None);
     }
 
     /// Implement Bresenham's line algorithm
@@ -206,17 +164,17 @@ impl CellRealm {
             || pos.1 == 0
             || pos.1 == self.height as isize - 1
         {
-            return Cell::new(CellType::EMPTY);
+            return Cell::new(CellType::EMPTY, None);
         }
 
         let neibs = vec![
             self.cells[self.get_idx((pos.0 - 1, pos.1 - 1))],
-            self.cells[self.get_idx((pos.0 - 1, pos.1))],
-            self.cells[self.get_idx((pos.0 - 1, pos.1 + 1))],
             self.cells[self.get_idx((pos.0, pos.1 - 1))],
-            self.cells[self.get_idx((pos.0, pos.1 + 1))],
             self.cells[self.get_idx((pos.0 + 1, pos.1 - 1))],
+            self.cells[self.get_idx((pos.0 - 1, pos.1))],
             self.cells[self.get_idx((pos.0 + 1, pos.1))],
+            self.cells[self.get_idx((pos.0 - 1, pos.1 + 1))],
+            self.cells[self.get_idx((pos.0, pos.1 + 1))],
             self.cells[self.get_idx((pos.0 + 1, pos.1 + 1))],
         ];
 
@@ -228,6 +186,7 @@ impl CellRealm {
         let mut cells_next: Vec<Cell> = Vec::with_capacity(self.cells.len());
 
         self.cells
+            .clone()
             .par_iter()
             .enumerate()
             .map(|(index, cell)| self.next_state_cell(self.get_pos(index as isize), cell))

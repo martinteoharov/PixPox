@@ -19,7 +19,7 @@ pub struct Cell {
     entity_id: usize,
     label: &'static str,
 
-    pos: (i32, i32),
+    pos: (isize, isize),
     state: bool,
     heat: u8,
     color: [u8; 4],
@@ -27,7 +27,7 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn new(entity_id: usize, pos: (i32, i32), state: bool) -> Self {
+    pub fn new(entity_id: usize, pos: (isize, isize), state: bool) -> Self {
         let color = if state {
             [255, 0, 0, 255]
         } else {

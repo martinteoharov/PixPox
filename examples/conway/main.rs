@@ -1,7 +1,9 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+pub mod camera;
 pub mod custom_components;
+pub mod global_pixel_map;
 
 extern crate dotenv;
 
@@ -27,6 +29,9 @@ use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 use winit_input_helper::WinitInputHelper;
 
+use crate::camera::Camera;
+use crate::global_pixel_map::GlobalPixelMap;
+
 use crate::custom_components::ConwayGridComponent;
 
 const WINDOW_TITLE: &str = "pixpox!";
@@ -48,14 +53,22 @@ async fn run() {
 
     let mut app = App::new(cfg.clone());
 
+    // Create a camera
+    let camera = Camera {
+        x: 0,
+        y: 0,
+        width: cfg.window_width / 4,
+        height: cfg.window_height / 4,
+    };
+
     // Define global data structures
     let global_pixel_map =
-        GlobalPixelMap::new_empty(cfg.window_width + 2, cfg.window_height + 2, [0, 0, 0, 0]);
+        GlobalPixelMap::new_empty(cfg.window_width, cfg.window_height, [0, 0, 0, 0], camera);
 
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
 
-    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.70);
+    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.50);
 
     app.world.add_component_to_entity(entity, grid_component);
 
@@ -63,9 +76,9 @@ async fn run() {
     let show_metrics_state = &mut false;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
         ui.show_metrics_window(state);
-        ui.window("Sandbox Performance (World)")
+        ui.window("Conway Performance (World)")
             .position([60.0, 390.0], imgui::Condition::Once)
-            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .size([200.0, 150.0], imgui::Condition::FirstUseEver)
             .collapsible(true)
             .build(|| {
                 for s in stats.get_formatted_stats().iter() {
@@ -74,7 +87,7 @@ async fn run() {
             });
     };
 
-    let show_about_state = &mut true;
+    let show_about_state = &mut false;
     let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
         ui.show_about_window(state);
     };
@@ -109,56 +122,4 @@ async fn run() {
     };
 
     app.run::<GlobalPixelMap>().await;
-}
-
-#[derive(Debug)]
-pub struct GlobalPixelMap {
-    pixelmap: Vec<[u8; 4]>,
-    width: u32,
-    height: u32,
-    clear_color: [u8; 4],
-}
-
-impl GlobalPixelMap {
-    pub fn new_empty(width: u32, height: u32, clear_color: [u8; 4]) -> Self {
-        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
-
-        for _y in 0..height {
-            for _x in 0..width {
-                let c: [u8; 4] = [0, 0, 0, 0];
-                pixelmap.push(c);
-            }
-        }
-
-        Self {
-            pixelmap,
-            width,
-            height,
-            clear_color,
-        }
-    }
-
-    pub fn draw_pos(&mut self, pos: (u32, u32), color: [u8; 4]) {
-        let idx = pos.1 * self.width + pos.0;
-        self.pixelmap[idx as usize] = color;
-    }
-
-    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
-        std::mem::swap(&mut self.pixelmap, vec);
-    }
-
-    pub fn run(&self) {}
-}
-
-impl Texture for GlobalPixelMap {
-    fn render(&self, pixels: &mut [u8]) {
-        debug!("Rendering GlobalPixelMap");
-        for (c, pix) in self.pixelmap.iter().zip(pixels.chunks_exact_mut(4)) {
-            pix.copy_from_slice(c);
-        }
-    }
-
-    fn size(&self) -> (u32, u32) {
-        return (self.width, self.height);
-    }
 }

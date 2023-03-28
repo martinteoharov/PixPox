@@ -9,7 +9,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     platform::run_return::EventLoopExtRunReturn,
     window::Window,
-    window::WindowBuilder,
+    window::{WindowBuilder, Fullscreen},
 };
 
 use pixpox_ecs::{component::Texture as RenderTexture, World};
@@ -57,6 +57,7 @@ impl<'a> App<'a> {
             );
             WindowBuilder::new()
                 .with_title(config.window_title)
+                .with_fullscreen(Some(Fullscreen::Borderless(None)))
                 .with_inner_size(scaled_size)
                 .with_min_inner_size(size)
                 .build(&event_loop)
@@ -93,12 +94,12 @@ impl<'a> App<'a> {
 
     pub async fn run<T: 'static + RenderTexture>(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
-            debug!("Event loop");
+            // debug!("Event loop");
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
                 // Run components
-                self.world.run();
+                self.world.run::<T>();
 
                 // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
@@ -108,7 +109,7 @@ impl<'a> App<'a> {
 
                 // Fetch Global Pixelmap
                 let pixelmap = storage
-                    .query_global_pixel_map::<T>("pixelmap")
+                    .query_global_pixel_map::<T>()
                     .expect("Could not query Pixel Map");
 
                 // Render Global Pixelmap to frame
