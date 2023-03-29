@@ -41,7 +41,7 @@ fn main() {
     pollster::block_on(run());
 }
 
-fn show_metrics(ui: &mut Ui, state: &mut bool) {
+fn show_metrics(ui: &mut Ui, _state: &mut bool) {
     ui.show_metrics_window(&mut true);
 }
 
@@ -54,12 +54,14 @@ async fn run() {
     let mut app = App::new(cfg.clone());
 
     // Create a camera
-    let camera = Camera {
-        x: 0,
-        y: 0,
-        width: cfg.window_width / 4,
-        height: cfg.window_height / 4,
-    };
+    let camera = Camera::new(
+        0,
+        0,
+        cfg.window_width / 4,
+        cfg.window_height / 4,
+        cfg.window_width,
+        cfg.window_height,
+    );
 
     // Define global data structures
     let global_pixel_map =
@@ -112,14 +114,6 @@ async fn run() {
 
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
     }
-
-    let mut callback = |event: &winit::event::Event<()>| {
-        let mut input = WinitInputHelper::new();
-
-        if input.update(&event) {
-            // Close events
-        }
-    };
 
     app.run::<GlobalPixelMap>().await;
 }

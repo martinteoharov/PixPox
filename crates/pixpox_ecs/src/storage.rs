@@ -1,17 +1,9 @@
 use lasso::{Spur, ThreadedRodeo};
-use string_interner::{symbol::SymbolU32, StringInterner};
 
 use std::{
     any::Any,
-    borrow::BorrowMut,
-    cell::RefCell,
-    collections::{hash_map::RandomState, HashMap},
-    fmt::Debug,
-    ops::DerefMut,
-    sync::{Arc, Mutex},
+    collections::{HashMap},
 };
-
-use log::{debug, info};
 
 use crate::{Texture, InputHandler};
 

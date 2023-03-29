@@ -1,7 +1,5 @@
 use std::sync::RwLock;
 
-use winit_input_helper::WinitInputHelper;
-
 use crate::{Storage, InputHandler};
 
 /// The Label trait is used to give a human-readable label to an ECS component.

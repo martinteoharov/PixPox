@@ -9,7 +9,6 @@ pub struct GlobalPixelMap {
     width: u32,
     height: u32,
     clear_color: [u8; 4],
-    scale: u32,
     camera: Camera,
 }
 
@@ -48,7 +47,6 @@ impl GlobalPixelMap {
             width,
             height,
             clear_color,
-            scale: 1,
             camera,
         }
     }
@@ -78,7 +76,7 @@ impl GlobalPixelMap {
         debug!("extract_visible_region() called with camera: {:?}", camera);
         debug!(
             "camera.width / camera.height: {}",
-            camera.width as f32 / camera.height as f32
+            camera.get_width() as f32 / camera.get_height() as f32
         );
         debug!(
             "self.width / self.height: {}",
@@ -86,14 +84,21 @@ impl GlobalPixelMap {
         );
 
         // calculate scaling factor
-        let mut sf = self.width / camera.width;
-        sf = sf - sf % 2;
+        let sf_width = self.width as f32 / camera.get_width() as f32;
+        let sf_height = self.height as f32 / camera.get_height() as f32;
+        let sf = sf_width.min(sf_height) as u32;
+        // sf = sf - sf % 2;
 
         let mut visible_pixelmap: Vec<[u8; 4]> = Vec::new();
 
-        for y in camera.y..(camera.y + camera.height) {
-            for x in camera.x..(camera.x + camera.width) {
+        for y in camera.get_y()..(camera.get_y() + camera.get_height()) {
+            for x in camera.get_x()..(camera.get_x() + camera.get_width()) {
                 let idx = self.get_idx((x as isize, y as isize));
+
+                if idx >= self.pixelmap.len() {
+                    break;
+                }
+
                 visible_pixelmap.push(self.pixelmap[idx as usize]);
             }
         }
@@ -102,10 +107,15 @@ impl GlobalPixelMap {
         let new_height = self.height as usize;
 
         let mut scaled = vec![[0; 4]; new_width * new_height];
+        
+        for y in 0..camera.get_height() {
+            for x in 0..camera.get_width() {
+                let o_idx = (camera.get_y() + y) * self.width + (camera.get_x() + x);
 
-        for y in 0..camera.height {
-            for x in 0..camera.width {
-                let o_idx = (camera.y + y) * self.width + (camera.x + x);
+                if o_idx as usize >= self.pixelmap.len() {
+                    break;
+                }
+
                 let pixel_value = self.pixelmap[o_idx as usize];
 
                 for dy in 0..sf {
@@ -113,6 +123,12 @@ impl GlobalPixelMap {
                         let s_x = (x * sf + dx) as usize;
                         let s_y = (y * sf + dy) as usize;
                         let s_idx = s_y * new_width + s_x;
+
+                        // ensure we don't go out of bounds
+                        if s_idx >= scaled.len() {
+                            break;
+                        }
+
                         scaled[s_idx] = pixel_value;
                     }
                 }
@@ -140,18 +156,16 @@ impl Texture for GlobalPixelMap {
 
     fn update(&mut self, input: &InputHandler) {
         let scroll_delta = input.winit.scroll_diff();
-        log::debug!("update() mouse scroll delta: [{}]", scroll_delta);
+        // log::error!("update() mouse scroll delta: [{}]", scroll_delta);
 
         // if scroll up, zoom in
-        if scroll_delta > 1.0 {
-            self.camera.width *= 1.1;
-            self.camera.height *= 1.1;
+        if scroll_delta >= 1.0 {
+            self.camera.zoom(0.8);
         }
 
         // if scroll down, zoom out
-        if scroll_delta < -1.0 {
-            self.camera.width -= 50;
-            self.camera.height -= 50;
+        if scroll_delta <= -1.0 {
+            self.camera.zoom(1.2);
         }
     }
 

@@ -2,9 +2,9 @@ use std::fmt::Debug;
 
 use serde_derive::{Deserialize, Serialize};
 
-use pixpox_renderer::{gui::Gui, wgpu::Texture, Pixels, SurfaceTexture};
+use pixpox_renderer::{gui::Gui, Pixels, SurfaceTexture};
 use winit::{
-    dpi::{LogicalPosition, LogicalSize},
+    dpi::{LogicalSize},
     event::{Event, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
     platform::run_return::EventLoopExtRunReturn,
@@ -15,7 +15,7 @@ use winit::{
 use pixpox_ecs::{component::Texture as RenderTexture, World};
 use winit_input_helper::WinitInputHelper;
 
-use log::{debug, error, info, warn};
+use log::{error, info};
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -34,7 +34,6 @@ pub struct App<'a> {
     window: Window,
     input: WinitInputHelper,
     paused: bool,
-    quit: bool,
 }
 
 impl<'a> App<'a> {
@@ -55,12 +54,16 @@ impl<'a> App<'a> {
                 config.window_width as f32 * config.window_scale,
                 config.window_height as f32 * config.window_scale,
             );
-            WindowBuilder::new()
+            let mut window = WindowBuilder::new()
                 .with_title(config.window_title)
-                .with_fullscreen(Some(Fullscreen::Borderless(None)))
                 .with_inner_size(scaled_size)
-                .with_min_inner_size(size)
-                .build(&event_loop)
+                .with_min_inner_size(size);
+
+            if config.window_fullscreen {
+                window = window.with_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+
+            window.build(&event_loop)
                 .unwrap()
         };
 
@@ -71,7 +74,7 @@ impl<'a> App<'a> {
 
             match Pixels::new(config.window_width, config.window_height, surface_texture) {
                 Ok(v) => v,
-                Err(e) => {
+                Err(_e) => {
                     println!("Could not initialize renderer");
                     panic!()
                 },
@@ -88,7 +91,6 @@ impl<'a> App<'a> {
             event_loop,
             window,
             paused: false,
-            quit: false,
         }
     }
 

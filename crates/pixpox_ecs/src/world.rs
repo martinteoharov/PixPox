@@ -57,7 +57,8 @@ pub enum BucketAction {
 pub struct InputHandler {
     pub winit: WinitInputHelper,
     pub mouse: (isize, isize),
-    pub mouse_prev: (isize, isize)
+    pub mouse_prev: (isize, isize),
+    pub scale: f32,
 }
 
 impl InputHandler {
@@ -65,7 +66,8 @@ impl InputHandler {
         Self {
             winit: WinitInputHelper::new(),
             mouse: (0, 0),
-            mouse_prev: (0, 0)
+            mouse_prev: (0, 0),
+            scale: 1.0
         }
     }
 
@@ -73,6 +75,15 @@ impl InputHandler {
         self.winit.update(event);
         self.mouse = mouse_pos;
         self.mouse_prev = prev_mouse_pos;
+    }
+
+    pub fn update_scale (&mut self, scale: f32) {
+        self.scale = scale;
+    }
+
+    // Calculate mousepos based on scale
+    pub fn get_mouse_pos(&self) -> (isize, isize) {
+        (self.mouse.0 / self.scale as isize, self.mouse.1 / self.scale as isize)
     }
 }
 
@@ -94,7 +105,7 @@ impl World {
         let component_vecs = Vec::new();
 
         // show some fps measurements every 5 seconds
-        let mut fps = Timer::apply(|delta_t, prev_tick| (delta_t, *prev_tick), 0)
+        let fps = Timer::apply(|delta_t, prev_tick| (delta_t, *prev_tick), 0)
             .every(time::Duration::from_secs(5))
             .start(time::Instant::now());
 
@@ -275,6 +286,12 @@ impl World {
     fn spawn_random_terrain() {}
 
     fn serialize() {}
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub trait ComponentVec: Send + Sync {
