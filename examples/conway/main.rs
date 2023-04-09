@@ -57,20 +57,19 @@ async fn run() {
     let camera = Camera::new(
         0,
         0,
-        cfg.window_width / 4,
         cfg.window_height / 4,
-        cfg.window_width,
+        cfg.window_width / 4,
         cfg.window_height,
+        cfg.window_width,
     );
 
-    // Define global data structures
-    let global_pixel_map =
-        GlobalPixelMap::new_empty(cfg.window_width, cfg.window_height, [0, 0, 0, 0], camera);
+    // Define global data structure
+    let global_pixel_map = GlobalPixelMap::new_empty(cfg.window_height * 2, cfg.window_width * 2, camera);
 
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
 
-    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.50);
+    let grid_component = ConwayGridComponent::new(cfg.window_height * 2, cfg.window_width * 2, 0.50);
 
     app.world.add_component_to_entity(entity, grid_component);
 

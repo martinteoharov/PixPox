@@ -8,7 +8,6 @@ pub struct GlobalPixelMap {
     pixelmap: Vec<[u8; 4]>,
     width: u32,
     height: u32,
-    clear_color: [u8; 4],
     camera: Camera,
 }
 
@@ -20,7 +19,6 @@ impl GlobalPixelMap {
     ///
     /// * `width` - The width of the pixelmap in pixels.
     /// * `height` - The height of the pixelmap in pixels.
-    /// * `clear_color` - The color to fill the pixelmap with.
     ///
     /// ### Returns
     ///
@@ -32,7 +30,13 @@ impl GlobalPixelMap {
     /// # use pixelmap::PixelMap;
     /// let pixelmap = PixelMap::new_empty(640, 480, [255, 0, 0, 255]);
     /// ```
-    pub fn new_empty(width: u32, height: u32, clear_color: [u8; 4], camera: Camera) -> Self {
+    pub fn new_empty(height: u32, width: u32, camera: Camera) -> Self {
+        // assert camera fits pixelmap dimensions
+        assert!(
+            camera.get_width() <= width && camera.get_height() <= height,
+            "Camera dimensions must be smaller than pixelmap dimensions"
+        );
+
         let mut pixelmap: Vec<[u8; 4]> = Vec::new();
 
         for _y in 0..height {
@@ -46,7 +50,6 @@ impl GlobalPixelMap {
             pixelmap,
             width,
             height,
-            clear_color,
             camera,
         }
     }
@@ -89,6 +92,8 @@ impl GlobalPixelMap {
         let sf = sf_width.min(sf_height) as u32;
         // sf = sf - sf % 2;
 
+        debug!("sf: {}", sf);
+
         let mut visible_pixelmap: Vec<[u8; 4]> = Vec::new();
 
         for y in camera.get_y()..(camera.get_y() + camera.get_height()) {
@@ -107,7 +112,7 @@ impl GlobalPixelMap {
         let new_height = self.height as usize;
 
         let mut scaled = vec![[0; 4]; new_width * new_height];
-        
+
         for y in 0..camera.get_height() {
             for x in 0..camera.get_width() {
                 let o_idx = (camera.get_y() + y) * self.width + (camera.get_x() + x);
@@ -137,6 +142,54 @@ impl GlobalPixelMap {
 
         scaled
     }
+
+    pub fn extract_and_scale_visible_region(&self, camera: &Camera) -> Vec<[u8; 4]> {
+        debug!(
+            "extract_and_scale_visible_region() called with camera: {:?}",
+            camera
+        );
+
+        let sf_width = self.width as f32 / camera.get_width() as f32;
+        let sf_height = self.height as f32 / camera.get_height() as f32;
+        let sf = sf_width.min(sf_height).ceil() as u32;
+
+        debug!(
+            "self.width: {}, camera.width: {}",
+            self.width,
+            camera.get_width()
+        );
+        debug!("sf_width: {}", sf_width);
+        debug!("sf_height: {}", sf_height);
+        debug!("sf: {}", sf);
+
+        let visible_width = camera.get_width() * sf;
+        let visible_height = camera.get_height() * sf;
+
+        let mut visible_pixelmap: Vec<[u8; 4]> =
+            vec![[0; 4]; (visible_width * visible_height) as usize];
+
+        for y in 0..camera.get_height() {
+            for x in 0..camera.get_width() {
+                let o_idx = self.get_idx((
+                    camera.get_x() as isize + x as isize,
+                    camera.get_y() as isize + y as isize,
+                ));
+                let pixel_value = self.pixelmap[o_idx];
+
+                for dy in 0..sf {
+                    for dx in 0..sf {
+                        let s_x = (x * sf + dx) as usize;
+                        let s_y = (y * sf + dy) as usize;
+                        let s_idx = s_y * visible_width as usize + s_x;
+
+                        visible_pixelmap[s_idx] = pixel_value;
+                    }
+                }
+            }
+        }
+
+        visible_pixelmap
+    }
 }
 
 impl Texture for GlobalPixelMap {
@@ -144,7 +197,8 @@ impl Texture for GlobalPixelMap {
         debug!("Rendering GlobalPixelMap");
         // TODO: Apply scaling
         // let pixelmap = self.scale(1);
-        let pixelmap = self.extract_visible_region(self.camera.clone());
+        // let pixelmap = self.extract_visible_region(self.camera.clone());
+        let pixelmap = self.extract_and_scale_visible_region(&self.camera);
 
         // Render buffer to texture
         let pixel_chunks = pixels.chunks_exact_mut(4);

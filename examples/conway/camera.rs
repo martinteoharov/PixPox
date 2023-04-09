@@ -1,3 +1,5 @@
+use log::debug;
+
 #[derive(Debug, Clone)]
 pub struct Camera {
     x: u32,
@@ -12,7 +14,7 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(x: u32, y: u32, width: u32, height: u32, max_height: u32, max_width: u32) -> Self {
+    pub fn new(x: u32, y: u32, height: u32, width: u32, max_height: u32, max_width: u32) -> Self {
         Self {
             x,
             y,
@@ -47,6 +49,7 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, scale: f32) {
+        /*
         self.width = (self.width as f32 * scale) as u32;
         self.height = (self.height as f32 * scale) as u32;
 
@@ -74,6 +77,20 @@ impl Camera {
             self.height
         };
 
+
+        */
+        debug!("ZOOM: self.width: {}, self.height: {}, scale: {}", self.width, self.height, scale);
+        let new_width = (self.width as f32 * scale) as u32;
+        let new_height = (self.height as f32 * scale) as u32;
+
+        if self.width as f32 / self.height as f32 > self.aspect_ratio {
+            self.width = (self.height as f32 * self.aspect_ratio) as u32;
+        } else {
+            self.height = (self.width as f32 / self.aspect_ratio) as u32;
+        }
+
+        self.width = new_width.clamp(self.min_width, self.max_width);
+        self.height = new_height.clamp(self.min_height, self.max_height);
     }
 
     // getters
@@ -91,5 +108,13 @@ impl Camera {
 
     pub fn get_height(&self) -> u32 {
         self.height
+    }
+
+    pub fn get_dim(&mut self) -> (u32, u32) {
+        (0, 0)
+    }
+
+    pub fn get_scale(&self) -> f32 {
+        self.width as f32 / self.max_width as f32
     }
 }

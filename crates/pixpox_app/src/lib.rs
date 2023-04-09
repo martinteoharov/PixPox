@@ -33,7 +33,6 @@ pub struct App<'a> {
     event_loop: EventLoop<()>,
     window: Window,
     input: WinitInputHelper,
-    paused: bool,
 }
 
 impl<'a> App<'a> {
@@ -90,7 +89,6 @@ impl<'a> App<'a> {
             input,
             event_loop,
             window,
-            paused: false,
         }
     }
 
@@ -153,10 +151,6 @@ impl<'a> App<'a> {
                     return;
                 }
 
-                if self.input.key_pressed_os(VirtualKeyCode::Space) {
-                    // Space is frame-step, so ensure we're paused
-                    self.paused = true;
-                }
 
                 // Handle mouse. This is a bit involved since support some simple
                 // line drawing (mostly because it makes nice looking patterns).
