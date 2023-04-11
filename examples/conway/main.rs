@@ -1,7 +1,6 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-pub mod camera;
 pub mod custom_components;
 pub mod global_pixel_map;
 
@@ -29,8 +28,8 @@ use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 use winit_input_helper::WinitInputHelper;
 
-use crate::camera::Camera;
 use crate::global_pixel_map::GlobalPixelMap;
+use pixpox_renderer::{Camera, Direction};
 
 use crate::custom_components::ConwayGridComponent;
 

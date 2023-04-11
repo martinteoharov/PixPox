@@ -2,7 +2,7 @@ use log::{debug, error};
 use pixpox_ecs::{InputHandler, Texture, Update};
 use winit::event::VirtualKeyCode;
 
-use crate::camera::{Camera, Direction};
+use pixpox_renderer::{Camera, Direction};
 
 #[derive(Debug)]
 pub struct GlobalPixelMap {
@@ -109,7 +109,6 @@ impl GlobalPixelMap {
             camera.get_height()
         );
  
-        // debug!("sf: {}", sf);
         debug!("sfw: {}", sfw);
         debug!("sfh: {}", sfh);
 
@@ -150,15 +149,10 @@ impl GlobalPixelMap {
 
 impl Texture for GlobalPixelMap {
     fn render(&self, pixels: &mut [u8]) {
-        debug!("Rendering GlobalPixelMap");
-        // TODO: Apply scaling
-        // let pixelmap = self.scale(1);
-        // let pixelmap = self.extract_visible_region(self.camera.clone());
         let pixelmap = self.extract_and_scale_visible_region(&self.camera);
 
         debug!("pixelmap len: {}", pixelmap.len());
 
-        // Render buffer to texture
         let pixel_chunks = pixels.chunks_exact_mut(4);
 
         for (c, pix) in pixelmap.iter().zip(pixel_chunks) {

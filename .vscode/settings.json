@@ -1,0 +1,5 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./crates/pixpox_renderer/Cargo.toml"
+    ]
+}
