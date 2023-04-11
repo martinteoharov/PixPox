@@ -54,6 +54,11 @@ impl Camera {
         } else {
             new_height = (new_width as f32 / self.aspect_ratio) as u32;
         }
+
+        let d_x = (self.width - new_width) as i32 / 2;
+        let d_y = (self.height - new_height) as i32 / 2;
+
+        self.move_origin(d_x, d_y);
         
         // Keep width and height in bounds (also keeping original aspect ratio)
         self.width = new_width.clamp(self.min_width, self.max_width);
@@ -62,11 +67,14 @@ impl Camera {
 
     // move function with direction
     pub fn move_direction(&mut self, direction: Direction) {
+        // calculate movement speed based on camera scale
+        let speed = (10.0 * self.get_scale()).ceil() as i32;
+
         match direction {
-            Direction::Up => self.move_origin(0, -10),
-            Direction::Down => self.move_origin(0, 10),
-            Direction::Left => self.move_origin(-10, 0),
-            Direction::Right => self.move_origin(10, 0),
+            Direction::Up => self.move_origin(0, -speed),
+            Direction::Down => self.move_origin(0, speed),
+            Direction::Left => self.move_origin(-speed, 0),
+            Direction::Right => self.move_origin(speed, 0),
         }
     }
 

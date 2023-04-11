@@ -29,7 +29,7 @@ impl GlobalPixelMap {
     ///
     /// ```
     /// # use pixelmap::PixelMap;
-    /// let pixelmap = PixelMap::new_empty(640, 480, [255, 0, 0, 255]);
+    /// let pixelmap = PixelMap::new_empty(640, 480);
     /// ```
     pub fn new_empty(window_height: u32, window_width: u32, camera: Camera) -> Self {
         // assert camera fits pixelmap dimensions
@@ -55,95 +55,40 @@ impl GlobalPixelMap {
         }
     }
 
-    /// * `pos`: (isize, isize) - (row, column) coordinates
     /// Returns index of the position in the grid
+    /// * `pos`: (isize, isize) - (column, row) coordinates
     pub fn get_idx(&self, pos: (isize, isize)) -> usize {
         let idx = pos.1 * self.window_width as isize + pos.0;
         idx as usize
     }
 
-    // Draws the given color at the given position in the canvas
+    /// Draws a pixel at the given position with the given color.
+    /// * `pos`: the position of the pixel to draw.
+    /// * `color`: the color to use when drawing the pixel.
     pub fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
         let idx = self.get_idx(pos);
         self.pixelmap[idx as usize] = color;
     }
 
     /// Draws a flat vector of pixels to the screen.
-    /// This is the main drawing method for this application.
+    /// * `vec`: the vector of pixels to draw.
     pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
         std::mem::swap(&mut self.pixelmap, vec);
     }
 
-    pub fn run(&self) {}
-
-    pub fn extract_visible_region(&self, camera: Camera) -> Vec<[u8; 4]> {
-        debug!("extract_visible_region() called with camera: {:?}", camera);
-        debug!(
-            "camera.width / camera.height: {}",
-            camera.get_width() as f32 / camera.get_height() as f32
-        );
-        debug!(
-            "self.width / self.height: {}",
-            self.window_width as f32 / self.window_height as f32
-        );
-
-        // calculate scaling factor
-        let sf_width = self.window_width as f32 / camera.get_width() as f32;
-        let sf_height = self.window_height as f32 / camera.get_height() as f32;
-        let sf = sf_width.min(sf_height) as u32;
-        // sf = sf - sf % 2;
-
-        debug!("sf: {}", sf);
-
-        let mut visible_pixelmap: Vec<[u8; 4]> = Vec::new();
-
-        for y in camera.get_y()..(camera.get_y() + camera.get_height()) {
-            for x in camera.get_x()..(camera.get_x() + camera.get_width()) {
-                let idx = self.get_idx((x as isize, y as isize));
-
-                if idx >= self.pixelmap.len() {
-                    break;
-                }
-
-                visible_pixelmap.push(self.pixelmap[idx as usize]);
-            }
-        }
-
-        let new_width = self.window_width as usize;
-        let new_height = self.window_height as usize;
-
-        let mut scaled = vec![[0; 4]; new_width * new_height];
-
-        for y in 0..camera.get_height() {
-            for x in 0..camera.get_width() {
-                let o_idx = (camera.get_y() + y) * self.window_width + (camera.get_x() + x);
-
-                if o_idx as usize >= self.pixelmap.len() {
-                    break;
-                }
-
-                let pixel_value = self.pixelmap[o_idx as usize];
-
-                for dy in 0..sf {
-                    for dx in 0..sf {
-                        let s_x = (x * sf + dx) as usize;
-                        let s_y = (y * sf + dy) as usize;
-                        let s_idx = s_y * new_width + s_x;
-
-                        // ensure we don't go out of bounds
-                        if s_idx >= scaled.len() {
-                            break;
-                        }
-
-                        scaled[s_idx] = pixel_value;
-                    }
-                }
-            }
-        }
-
-        scaled
-    }
-
+    /// Extracts and scales the camera pixelmap to the window pixelmap.
+    /// * `camera`: the camera to use for extracting the visible region.
+    /// ### Example
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// # use camera::Camera;
+    /// let mut pixelmap = PixelMap::new_empty(640, 480);
+    /// let camera = Camera::new(0, 0, 320, 240);
+    /// pixelmap.extract_and_scale_visible_region(&camera);
+    /// ```
+    /// ### Returns
+    /// A vector of pixels representing the visible region of the camera.
+    /// The vector is scaled to the window dimensions.
     pub fn extract_and_scale_visible_region(&self, camera: &Camera) -> Vec<[u8; 4]> {
         debug!(
             "extract_and_scale_visible_region() called with camera: {:?}",
@@ -152,7 +97,9 @@ impl GlobalPixelMap {
 
         let sf_width = self.window_width as f32 / camera.get_width() as f32;
         let sf_height = self.window_height as f32 / camera.get_height() as f32;
-        let sf = sf_width.min(sf_height).ceil() as u32;
+        // let sf = sf_width.min(sf_height).ceil() as u32;
+        let sfw = sf_width.ceil() as u32;
+        let sfh = sf_height.ceil() as u32;
 
         debug!(
             "region: [window_width: {}, camera.width: {} | window.height: {}, camera.height: {}]",
@@ -161,8 +108,10 @@ impl GlobalPixelMap {
             self.window_height,
             camera.get_height()
         );
-
-        debug!("sf: {}", sf);
+ 
+        // debug!("sf: {}", sf);
+        debug!("sfw: {}", sfw);
+        debug!("sfh: {}", sfh);
 
         // scale camera_pixelmap to window_pixelmap
         let mut window_pixelmap = vec![[0; 4]; (self.window_width * self.window_height) as usize];
@@ -174,23 +123,22 @@ impl GlobalPixelMap {
                 // calculate camera index
                 let camera_idx = self.get_idx((camera_x as isize, camera_y as isize));
 
+                // ensure camera index is in bounds
+                if camera_idx >= self.pixelmap.len() {
+                    continue;
+                }
+
                 // get camera pixel value to scale
                 let pixel_value = self.pixelmap[camera_idx as usize];
 
                 // scale camera pixel value to real window
-                for dy in 0..sf {
-                    for dx in 0..sf {
-                        let s_x = (real_x * sf + dx) as usize;
-                        let s_y = (real_y * sf + dy) as usize;
-                        let s_idx = self.get_idx((s_x as isize, s_y as isize));
+                for dy in 0..sfh {
+                    for dx in 0..sfw {
+                        let s_x = (real_x * sfw + dx).clamp(0, self.window_width as u32 - 1);
+                        let s_y = (real_y * sfh + dy).clamp(0, self.window_height as u32 - 1);
+                        let s_idx = s_y as usize * self.window_width as usize + s_x as usize;
 
-                        if s_idx == window_pixelmap.len() - 1 {
-                            debug!("s_idx: {}, sf: {}, s_x: {}, s_y: {}, real_x: {}, real_y: {}", s_idx, sf, s_x, s_y, real_x, real_y);
-                        }
-
-                        let s_idx_clamped = s_idx.min(window_pixelmap.len() - 1);
-
-                        window_pixelmap[s_idx_clamped] = pixel_value;
+                        window_pixelmap[s_idx] = pixel_value;
                     }
                 }
             }
