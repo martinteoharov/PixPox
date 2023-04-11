@@ -1,5 +1,12 @@
 use log::debug;
 
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone)]
 pub struct Camera {
     x: u32,
@@ -15,6 +22,8 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(x: u32, y: u32, height: u32, width: u32, max_height: u32, max_width: u32) -> Self {
+        let aspect_ratio = width as f32 / height as f32;
+
         Self {
             x,
             y,
@@ -22,75 +31,48 @@ impl Camera {
             height,
             max_height,
             max_width,
-            min_width: 10,
+            min_width: (10 as f32 * aspect_ratio) as u32,
             min_height: 10,
-            aspect_ratio: width as f32 / height as f32,
+            aspect_ratio,
         }
     }
 
-    pub fn move_origin(&mut self, x: i32, y: i32) {
-        self.x = (self.x as i32 + x) as u32;
-        self.y = (self.y as i32 + y) as u32;
-    }
-
-    pub fn resize(&mut self, width: u32, height: u32) {
-        // don't allow resizing to be bigger than max
-        self.width = if width > self.max_width {
-            self.max_width
-        } else {
-            width
-        };
-
-        self.height = if height > self.max_height {
-            self.max_height
-        } else {
-            height
-        };
+    fn move_origin(&mut self, x: i32, y: i32) {
+        self.x = (self.x as i32 + x).clamp(0, (self.max_width - self.width) as i32) as u32;
+        self.y = (self.y as i32 + y).clamp(0, (self.max_height - self.height) as i32) as u32;
     }
 
     pub fn zoom(&mut self, scale: f32) {
-        /*
-        self.width = (self.width as f32 * scale) as u32;
-        self.height = (self.height as f32 * scale) as u32;
+        debug!("camera zoom: self.width: {}, self.height: {}, scale: {}", self.width, self.height, scale);
 
-        // keep aspect ratio and ensure max size
-        if self.width as f32 / self.height as f32 > self.aspect_ratio {
-            self.width = (self.height as f32 * self.aspect_ratio) as u32;
+        let mut new_width = (self.width as f32 * scale) as u32;
+        let mut new_height = (self.height as f32 * scale) as u32;
+
+        // Correct aspect ratio
+        if new_width as f32 / new_height as f32 > self.aspect_ratio {
+            new_width = (new_height as f32 * self.aspect_ratio) as u32;
         } else {
-            self.height = (self.width as f32 / self.aspect_ratio) as u32;
+            new_height = (new_width as f32 / self.aspect_ratio) as u32;
         }
-
-        // keep width and height in bounds
-        self.width = if self.width < self.min_width {
-            self.min_width
-        } else if self.width > self.max_width {
-            self.max_width
-        } else {
-            self.width
-        };
-
-        self.height = if self.height < self.min_height {
-            self.min_height
-        } else if self.height > self.max_height {
-            self.max_height
-        } else {
-            self.height
-        };
-
-
-        */
-        debug!("ZOOM: self.width: {}, self.height: {}, scale: {}", self.width, self.height, scale);
-        let new_width = (self.width as f32 * scale) as u32;
-        let new_height = (self.height as f32 * scale) as u32;
-
-        if self.width as f32 / self.height as f32 > self.aspect_ratio {
-            self.width = (self.height as f32 * self.aspect_ratio) as u32;
-        } else {
-            self.height = (self.width as f32 / self.aspect_ratio) as u32;
-        }
-
+        
+        // Keep width and height in bounds (also keeping original aspect ratio)
         self.width = new_width.clamp(self.min_width, self.max_width);
         self.height = new_height.clamp(self.min_height, self.max_height);
+    }
+
+    // move function with direction
+    pub fn move_direction(&mut self, direction: Direction) {
+        match direction {
+            Direction::Up => self.move_origin(0, -10),
+            Direction::Down => self.move_origin(0, 10),
+            Direction::Left => self.move_origin(-10, 0),
+            Direction::Right => self.move_origin(10, 0),
+        }
+    }
+
+    // move function with delta
+    pub fn move_delta(&mut self, delta: (i32, i32)) {
+        self.move_origin(delta.0, delta.1);
     }
 
     // getters

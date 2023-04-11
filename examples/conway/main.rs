@@ -57,14 +57,14 @@ async fn run() {
     let camera = Camera::new(
         0,
         0,
-        cfg.window_height / 4,
-        cfg.window_width / 4,
+        cfg.window_height,
+        cfg.window_width,
         cfg.window_height,
         cfg.window_width,
     );
 
     // Define global data structure
-    let global_pixel_map = GlobalPixelMap::new_empty(cfg.window_height * 2, cfg.window_width * 2, camera);
+    let global_pixel_map = GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
 
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
