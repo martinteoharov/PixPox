@@ -68,17 +68,17 @@ async fn run() {
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
 
-    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.50);
+    let grid_component = ConwayGridComponent::new(1000, 1000, 0.50);
 
     app.world.add_component_to_entity(entity, grid_component);
 
     // Define UI Callbacks and States
-    let show_metrics_state = &mut false;
+    let show_metrics_state = &mut true;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
-        ui.show_metrics_window(state);
+        // ui.show_metrics_window(state);
         ui.window("Conway Performance (World)")
-            .position([60.0, 390.0], imgui::Condition::Once)
-            .size([200.0, 150.0], imgui::Condition::FirstUseEver)
+            .position([60.0, 60.0], imgui::Condition::Once)
+            .size([200.0, 200.0], imgui::Condition::FirstUseEver)
             .collapsible(true)
             .build(|| {
                 for s in stats.get_formatted_stats().iter() {

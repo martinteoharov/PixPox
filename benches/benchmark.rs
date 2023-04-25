@@ -1,5 +1,6 @@
+/*
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pixpox_app::{App, AppConfig};
+use pixpox_app::{App};
 use winit::dpi::LogicalPosition;
 
 fn fibonacci(n: u64) -> u64 {
@@ -38,3 +39,5 @@ fn criterion_benchmark(c: &mut Criterion) {
 
 criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
+
+*/

@@ -19,7 +19,7 @@ use pixpox::pixpox_app::App;
 use pixpox::pixpox_utils;
 use pixpox_app::Config;
 use pixpox_ecs::entity::Entity;
-use pixpox_ecs::{world, Texture, World};
+use pixpox_ecs::{world, Texture, World, InputHandler};
 use pixpox_ecs::{Run, Update};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
 use pixpox_utils::CA::cell_realm::CellRealm;
@@ -168,5 +168,9 @@ impl Texture for GlobalPixelMap {
 
     fn size(&self) -> (u32, u32) {
         return (self.width, self.height);
+    }
+
+    fn update(&mut self, input: &InputHandler) {
+        debug!("Updating GlobalPixelMap");
     }
 }
