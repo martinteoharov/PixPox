@@ -1,7 +1,7 @@
 # PixPox - 2D Pixel Game Engine with advanced Cellular Automata Capabilities
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Build](https://github.com/martinteoharov/PixPox/actions/workflows/rust.yml/badge.svg)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 <img src="https://user-images.githubusercontent.com/43793073/234361085-053432ef-b9fe-4581-9795-4ddba162bf0c.png" alt="Image" width="400" height="200">
 
