@@ -1,0 +1,4501 @@
+../crates/pixpox_app/Cargo.toml begin
+[package]
+name = "pixpox_app"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+wgpu = "0.13"
+winit = "0.27"
+env_logger = "0.9"
+log = "0.4"
+winit_input_helper = "0.13.0"
+raw-window-handle = "0.5"
+string-interner = "0.14.0"
+
+
+# Local crates
+pixpox_ecs = { path = "../pixpox_ecs" }
+pixpox_renderer = { path = "../pixpox_renderer" }
+serde_derive = "1.0.152"
+serde = "1.0.152"
+
+../crates/pixpox_app/Cargo.toml end
+../crates/pixpox_app/src/lib.rs begin
+use std::fmt::Debug;
+
+use serde_derive::{Deserialize, Serialize};
+
+use pixpox_renderer::{gui::Gui, Pixels, SurfaceTexture};
+use winit::{
+    dpi::{LogicalSize},
+    event::{Event, VirtualKeyCode},
+    event_loop::{ControlFlow, EventLoop},
+    platform::run_return::EventLoopExtRunReturn,
+    window::Window,
+    window::{WindowBuilder, Fullscreen},
+};
+
+use pixpox_ecs::{component::Texture as RenderTexture, World};
+use winit_input_helper::WinitInputHelper;
+
+use log::{error, info};
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+pub struct Config {
+    pub window_title: String,
+    pub window_height: u32,
+    pub window_width: u32,
+    pub window_scale: f32,
+    pub window_fullscreen: bool,
+}
+
+pub struct App<'a> {
+    pub world: World,
+    pixels: Pixels,
+    pub gui: Gui<'a>,
+    event_loop: EventLoop<()>,
+    window: Window,
+    input: WinitInputHelper,
+}
+
+impl<'a> App<'a> {
+    // Create a new application. Panics if renderer can not be initialized.
+    pub fn new(config: Config) -> App<'a> {
+        // Initialize WGPU logging
+        env_logger::init();
+
+        let world = World::new();
+
+        // Define the event loop
+        let event_loop = EventLoop::new();
+        let input = WinitInputHelper::new();
+
+        let window = {
+            let size = LogicalSize::new(config.window_width as f64, config.window_height as f64);
+            let scaled_size = LogicalSize::new(
+                config.window_width as f32 * config.window_scale,
+                config.window_height as f32 * config.window_scale,
+            );
+            let mut window = WindowBuilder::new()
+                .with_title(config.window_title)
+                .with_inner_size(scaled_size)
+                .with_min_inner_size(size);
+
+            if config.window_fullscreen {
+                window = window.with_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+
+            window.build(&event_loop)
+                .unwrap()
+        };
+
+        let pixels = {
+            let window_size = window.inner_size();
+            let surface_texture =
+                SurfaceTexture::new(window_size.width, window_size.height, &window);
+
+            match Pixels::new(config.window_width, config.window_height, surface_texture) {
+                Ok(v) => v,
+                Err(_e) => {
+                    println!("Could not initialize renderer");
+                    panic!()
+                },
+            }
+        };
+
+        let gui = Gui::new(&window, &pixels);
+
+        Self {
+            world,
+            pixels,
+            gui,
+            input,
+            event_loop,
+            window,
+        }
+    }
+
+    pub async fn run<T: 'static + RenderTexture>(&mut self) {
+        self.event_loop.run_return(|event, _target, control_flow| {
+            // debug!("Event loop");
+
+            // The one and only event that winit_input_helper doesn't have for us...
+            if let Event::RedrawRequested(_) = event {
+                // Run components
+                self.world.run::<T>();
+
+                // Get screen frame to render to
+                let pixels = self.pixels.get_frame_mut();
+
+                // Lock storage
+                let mut storage = self.world.storage.write().unwrap();
+
+                // Fetch Global Pixelmap
+                let pixelmap = storage
+                    .query_global_pixel_map::<T>()
+                    .expect("Could not query Pixel Map");
+
+                // Render Global Pixelmap to frame
+                pixelmap.render(pixels);
+
+                // Prepare Dear ImGui
+                self.gui
+                    .prepare(&self.window)
+                    .expect("gui.prepare() failed");
+
+                let _render_result = self.pixels.render_with(|encoder, render_target, context| {
+                    // Render the world texture
+                    context.scaling_renderer.render(encoder, render_target);
+
+                    // Render Dear ImGui
+                    self.gui.render(
+                        &self.window,
+                        encoder,
+                        render_target,
+                        context,
+                        &self.world.stats,
+                    )?;
+
+                    Ok(())
+                });
+            }
+
+            // Handle input events
+            self.gui.handle_event(&self.window, &event);
+            let mut mouse_cell: (isize, isize) = (0, 0);
+            let mut mouse_prev_cell: (isize, isize) = (0, 0);
+
+            // For everything else, for let winit_input_helper collect events to build its state.
+            // It returns `true` when it is time to update our game state and request a redraw.
+            if self.input.update(&event) {
+                // Close events
+                if self.input.key_pressed(VirtualKeyCode::Escape) || self.input.quit() {
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+
+
+                // Handle mouse. This is a bit involved since support some simple
+                // line drawing (mostly because it makes nice looking patterns).
+                (mouse_cell, mouse_prev_cell) = self
+                    .input
+                    .mouse()
+                    .map(|(mx, my)| {
+                        let (dx, dy) = self.input.mouse_diff();
+                        let prev_x = mx - dx;
+                        let prev_y = my - dy;
+
+                        let (mx_i, my_i) = self
+                            .pixels
+                            .window_pos_to_pixel((mx, my))
+                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+
+                        let (px_i, py_i) = self
+                            .pixels
+                            .window_pos_to_pixel((prev_x, prev_y))
+                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+
+                        (
+                            (mx_i as isize, my_i as isize),
+                            (px_i as isize, py_i as isize),
+                        )
+                    })
+                    .unwrap_or_default();
+
+                // Resize the window
+                if let Some(size) = self.input.window_resized() {
+                    info!("Resize detected");
+                    if let Err(err) = self.pixels.resize_surface(size.width, size.height) {
+                        error!("pixels.resize_surface() failed: {err}");
+                        *control_flow = ControlFlow::Exit;
+                        return;
+                    }
+                }
+
+                self.window.request_redraw();
+            }
+
+            self.world.input.update(&event, mouse_cell, mouse_prev_cell);
+        });
+    }
+}
+
+../crates/pixpox_app/src/lib.rs end
+../crates/pixpox_physics/Cargo.toml begin
+[package]
+name = "pixpox_physics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+../crates/pixpox_physics/Cargo.toml end
+../crates/pixpox_physics/src/lib.rs begin
+/* physics/mod.rs
+ *
+ * This file is the entry point for the physics system.
+ */
+../crates/pixpox_physics/src/lib.rs end
+../crates/pixpox_physics/src/compute/mod.rs begin
+/* physics/compute/mod.rs
+ *
+ * This file is responsible for handling physics with compute shaders.
+ * It includes definitions for the automata of the various 
+ * physics in play & the shaders.
+ */
+
+../crates/pixpox_physics/src/compute/mod.rs end
+../crates/pixpox_renderer/Cargo.toml begin
+[package]
+name = "pixpox_renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "0.27"
+env_logger = "0.9"
+log = "0.4"
+wgpu = "0.15"
+pollster = "0.2"
+bytemuck = { version = "1.4", features = [ "derive" ] }
+rand = "0.8"
+ultraviolet = "0.9"
+raw-window-handle = "0.5"
+thiserror = "1.0"
+imgui = "0.10.0"
+imgui-winit-support = "0.10.0"
+imgui-wgpu = "0.22.0"
+
+# Local Crates
+pixpox_utils = { path = "../pixpox_utils" }
+
+../crates/pixpox_renderer/Cargo.toml end
+../crates/pixpox_renderer/src/builder.rs begin
+use crate::renderer::{ScalingMatrix, ScalingRenderer};
+use crate::{Error, Pixels, PixelsContext, SurfaceSize, SurfaceTexture, TextureError};
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+
+/// A builder to help create customized pixel buffers.
+pub struct PixelsBuilder<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle> {
+    request_adapter_options: Option<wgpu::RequestAdapterOptions<'req>>,
+    device_descriptor: Option<wgpu::DeviceDescriptor<'dev>>,
+    backend: wgpu::Backends,
+    width: u32,
+    height: u32,
+    _pixel_aspect_ratio: f64,
+    present_mode: wgpu::PresentMode,
+    surface_texture: SurfaceTexture<'win, W>,
+    texture_format: wgpu::TextureFormat,
+    render_texture_format: Option<wgpu::TextureFormat>,
+    surface_texture_format: Option<wgpu::TextureFormat>,
+    clear_color: wgpu::Color,
+    blend_state: wgpu::BlendState,
+}
+
+impl<'req, 'dev, 'win, W: HasRawWindowHandle + HasRawDisplayHandle>
+    PixelsBuilder<'req, 'dev, 'win, W>
+{
+    /// Create a builder that can be finalized into a [`Pixels`] pixel buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pixels::wgpu::{PowerPreference, RequestAdapterOptions};
+    ///
+    /// # use pixels::PixelsBuilder;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(256, 240, &window);
+    /// let mut pixels = PixelsBuilder::new(256, 240, surface_texture)
+    ///     .request_adapter_options(RequestAdapterOptions {
+    ///         power_preference: PowerPreference::HighPerformance,
+    ///         force_fallback_adapter: false,
+    ///         compatible_surface: None,
+    ///     })
+    ///     .enable_vsync(false)
+    ///     .build()?;
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when `width` or `height` are 0.
+    pub fn new(width: u32, height: u32, surface_texture: SurfaceTexture<'win, W>) -> Self {
+        assert!(width > 0);
+        assert!(height > 0);
+
+        Self {
+            request_adapter_options: None,
+            device_descriptor: None,
+            backend: wgpu::util::backend_bits_from_env().unwrap_or({
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    wgpu::Backends::PRIMARY
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    wgpu::Backends::all()
+                }
+            }),
+            width,
+            height,
+            _pixel_aspect_ratio: 1.0,
+            present_mode: wgpu::PresentMode::Immediate,
+            surface_texture,
+            texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            render_texture_format: None,
+            surface_texture_format: None,
+            clear_color: wgpu::Color::BLACK,
+            blend_state: wgpu::BlendState::ALPHA_BLENDING,
+        }
+    }
+
+    /// Add options for requesting a [`wgpu::Adapter`].
+    pub fn request_adapter_options(
+        mut self,
+        request_adapter_options: wgpu::RequestAdapterOptions<'req>,
+    ) -> Self {
+        self.request_adapter_options = Some(request_adapter_options);
+        self
+    }
+
+    /// Add options for requesting a [`wgpu::Device`].
+    pub fn device_descriptor(mut self, device_descriptor: wgpu::DeviceDescriptor<'dev>) -> Self {
+        self.device_descriptor = Some(device_descriptor);
+        self
+    }
+
+    /// Set which backends wgpu will attempt to use.
+    ///
+    /// The default value is `PRIMARY`, which enables the well supported backends for wgpu.
+    pub fn wgpu_backend(mut self, backend: wgpu::Backends) -> Self {
+        self.backend = backend;
+        self
+    }
+
+    /// Set the pixel aspect ratio to simulate non-square pixels.
+    ///
+    /// This setting enables a render pass that horizontally scales the pixel buffer by the given
+    /// factor.
+    ///
+    /// E.g. set this to `8.0 / 7.0` for an 8:7 pixel aspect ratio.
+    ///
+    /// # Panics
+    ///
+    /// The aspect ratio must be > 0.
+    ///
+    /// # Warning
+    ///
+    /// This documentation is hidden because support for pixel aspect ratio is incomplete.
+    #[doc(hidden)]
+    pub fn pixel_aspect_ratio(mut self, pixel_aspect_ratio: f64) -> Self {
+        assert!(pixel_aspect_ratio > 0.0);
+
+        self._pixel_aspect_ratio = pixel_aspect_ratio;
+        self
+    }
+
+    /// Enable or disable Vsync.
+    ///
+    /// Vsync is enabled by default. It cannot be disabled on Web targets.
+    ///
+    /// The `wgpu` present mode will be set to `AutoVsync` when Vsync is enabled, or `AutoNoVsync`
+    /// when Vsync is disabled. To set the present mode to `Mailbox` or another value, use the
+    /// [`PixelsBuilder::present_mode`] method.
+    pub fn enable_vsync(mut self, enable_vsync: bool) -> Self {
+        self.present_mode = if enable_vsync {
+            wgpu::PresentMode::AutoVsync
+        } else {
+            wgpu::PresentMode::AutoNoVsync
+        };
+        self
+    }
+
+    /// Set the `wgpu` present mode.
+    ///
+    /// This differs from [`PixelsBuilder::enable_vsync`] by allowing the present mode to be set to
+    /// any value.
+    pub fn present_mode(mut self, present_mode: wgpu::PresentMode) -> Self {
+        self.present_mode = present_mode;
+        self
+    }
+
+    /// Set the texture format.
+    ///
+    /// The default value is `Rgba8UnormSrgb`, which is 4 unsigned bytes in `RGBA` order using the
+    /// sRGB color space. This is typically what you want when you are working with color values
+    /// from popular image editing tools or web apps.
+    ///
+    /// This is the pixel format of the texture that most applications will interact with directly.
+    /// The format influences the structure of byte data that is returned by [`Pixels::get_frame`].
+    pub fn texture_format(mut self, texture_format: wgpu::TextureFormat) -> Self {
+        self.texture_format = texture_format;
+        self
+    }
+
+    /// Set the render texture format.
+    ///
+    /// This falls back on [`Pixels::surface_texture_format`] if not set.
+    ///
+    /// The [`ScalingRenderer`] uses this format for its own render target.
+    /// This is really only useful if you are running a custom shader pipeline and need different formats
+    /// for the intermediary textures (such as `Rgba16Float` for HDR rendering).
+    /// There is a full example of a
+    /// [custom-shader](https://github.com/parasyte/pixels/tree/master/examples/custom-shader)
+    /// available that demonstrates how to deal with this.
+    pub fn render_texture_format(mut self, texture_format: wgpu::TextureFormat) -> Self {
+        self.render_texture_format = Some(texture_format);
+        self
+    }
+
+    /// Set the surface texture format.
+    ///
+    /// The default value is chosen automatically by the surface (if it can) with a fallback to
+    /// `Bgra8UnormSrgb` (which is 4 unsigned bytes in `BGRA` order using the sRGB color space).
+    /// Setting this format correctly depends on the hardware/platform the pixel buffer is rendered
+    /// to. The chosen format can be retrieved later with [`Pixels::render_texture_format`].
+    ///
+    /// This method controls the format of the surface frame buffer, which has strict texture
+    /// format requirements. Applications will never interact directly with the pixel data of this
+    /// texture, but a view is provided to the `render_function` closure by [`Pixels::render_with`].
+    /// The render texture can only be used as the final render target at the end of all
+    /// post-processing shaders.
+    pub fn surface_texture_format(mut self, texture_format: wgpu::TextureFormat) -> Self {
+        self.surface_texture_format = Some(texture_format);
+        self
+    }
+
+    /// Set the blend state.
+    ///
+    /// Allows customization of how to mix the new and existing pixels in a texture
+    /// when rendering.
+    ///
+    /// The default blend state is alpha blending with non-premultiplied alpha.
+    ///
+    /// ```no_run
+    /// use pixels::wgpu::BlendState;
+    ///
+    /// # use pixels::PixelsBuilder;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// // Replace the old pixels with the new without mixing.
+    /// let mut pixels = PixelsBuilder::new(320, 240, surface_texture)
+    ///     .blend_state(wgpu::BlendState::REPLACE)
+    ///     .build()?;
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn blend_state(mut self, blend_state: wgpu::BlendState) -> Self {
+        self.blend_state = blend_state;
+        self
+    }
+
+    /// Set the clear color.
+    ///
+    /// Allows customization of the background color and the border drawn for non-integer scale
+    /// values.
+    ///
+    /// The default value is pure black.
+    ///
+    /// ```no_run
+    /// use pixels::wgpu::Color;
+    ///
+    /// # use pixels::PixelsBuilder;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// // Set clear color to bright magenta.
+    /// let mut pixels = PixelsBuilder::new(320, 240, surface_texture)
+    ///     .clear_color(Color {
+    ///         r: 1.0,
+    ///         g: 0.0,
+    ///         b: 1.0,
+    ///         a: 1.0,
+    ///     })
+    ///     .build()?;
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn clear_color(mut self, color: wgpu::Color) -> Self {
+        self.clear_color = color;
+        self
+    }
+
+    /// Create a pixel buffer from the options builder.
+    ///
+    /// This is the private implementation shared by [`PixelsBuilder::build`] and
+    /// [`PixelsBuilder::build_async`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a [`wgpu::Adapter`] cannot be found.
+    async fn build_impl(self) -> Result<Pixels, Error> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: self.backend,
+            ..Default::default()
+        });
+
+        // TODO: Use `options.pixel_aspect_ratio` to stretch the scaled texture
+        let surface = unsafe { instance.create_surface(self.surface_texture.window) }?;
+        let compatible_surface = Some(&surface);
+        let request_adapter_options = &self.request_adapter_options;
+        let adapter = match wgpu::util::initialize_adapter_from_env(&instance, self.backend) {
+            Some(adapter) => Some(adapter),
+            None => {
+                instance
+                    .request_adapter(&request_adapter_options.as_ref().map_or_else(
+                        || wgpu::RequestAdapterOptions {
+                            compatible_surface,
+                            force_fallback_adapter: false,
+                            power_preference:
+                                wgpu::util::power_preference_from_env().unwrap_or_default(),
+                        },
+                        |rao| wgpu::RequestAdapterOptions {
+                            compatible_surface: rao.compatible_surface.or(compatible_surface),
+                            force_fallback_adapter: rao.force_fallback_adapter,
+                            power_preference: rao.power_preference,
+                        },
+                    ))
+                    .await
+            }
+        };
+
+        let adapter = adapter.ok_or(Error::AdapterNotFound)?;
+
+        let device_descriptor = self
+            .device_descriptor
+            .unwrap_or_else(|| wgpu::DeviceDescriptor {
+                limits: adapter.limits(),
+                ..wgpu::DeviceDescriptor::default()
+            });
+
+        let (device, queue) = adapter.request_device(&device_descriptor, None).await?;
+
+        let surface_capabilities = surface.get_capabilities(&adapter);
+        let present_mode = self.present_mode;
+        let surface_texture_format = self.surface_texture_format.unwrap_or_else(|| {
+            *surface_capabilities
+                .formats
+                .iter()
+                .find(|format| format.describe().srgb)
+                .unwrap_or(&wgpu::TextureFormat::Bgra8UnormSrgb)
+        });
+        let render_texture_format = self.render_texture_format.unwrap_or(surface_texture_format);
+
+        // Create the backing texture
+        let surface_size = self.surface_texture.size;
+        let clear_color = self.clear_color;
+        let blend_state = self.blend_state;
+        let (scaling_matrix_inverse, texture_extent, texture, scaling_renderer, pixels_buffer_size) =
+            create_backing_texture(
+                &device,
+                // Backing texture values
+                self.width,
+                self.height,
+                self.texture_format,
+                // Render texture values
+                &surface_size,
+                render_texture_format,
+                // Clear color and blending values
+                clear_color,
+                blend_state,
+            )?;
+
+        // Create the pixel buffer
+        let mut pixels = Vec::with_capacity(pixels_buffer_size);
+        pixels.resize_with(pixels_buffer_size, Default::default);
+
+        let alpha_mode = surface_capabilities.alpha_modes[0];
+
+        // Instantiate the Pixels struct
+        let context = PixelsContext {
+            device,
+            queue,
+            surface,
+            texture,
+            texture_extent,
+            texture_format: self.texture_format,
+            texture_format_size: get_texture_format_size(self.texture_format),
+            scaling_renderer,
+        };
+
+        let pixels = Pixels {
+            context,
+            surface_size,
+            present_mode,
+            render_texture_format,
+            surface_texture_format,
+            blend_state,
+            pixels,
+            scaling_matrix_inverse,
+            alpha_mode,
+        };
+        pixels.reconfigure_surface();
+
+        Ok(pixels)
+    }
+
+    /// Create a pixel buffer from the options builder.
+    ///
+    /// This method blocks the current thread, making it unusable on Web targets. Use
+    /// [`PixelsBuilder::build_async`] for a non-blocking alternative.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a [`wgpu::Adapter`] or [`wgpu::Device`] cannot be found.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn build(self) -> Result<Pixels, Error> {
+        pollster::block_on(self.build_impl())
+    }
+
+    /// Create a pixel buffer from the options builder without blocking the current thread.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pixels::wgpu::{Backends, DeviceDescriptor, Limits};
+    ///
+    /// # async fn test() -> Result<(), pixels::Error> {
+    /// # use pixels::PixelsBuilder;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(256, 240, &window);
+    /// let mut pixels = PixelsBuilder::new(256, 240, surface_texture)
+    ///     .enable_vsync(false)
+    ///     .build_async()
+    ///     .await?;
+    /// # Ok::<(), pixels::Error>(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a [`wgpu::Adapter`] or [`wgpu::Device`] cannot be found.
+    pub async fn build_async(self) -> Result<Pixels, Error> {
+        self.build_impl().await
+    }
+}
+
+/// Compare the given size to the limits defined by `device`.
+///
+/// # Errors
+///
+/// - [`TextureError::TextureWidth`] when `width` is 0 or greater than GPU texture limits.
+/// - [`TextureError::TextureHeight`] when `height` is 0 or greater than GPU texture limits.
+pub fn check_texture_size(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> Result<(), TextureError> {
+    let limits = device.limits();
+    if width == 0 || width > limits.max_texture_dimension_2d {
+        return Err(TextureError::TextureWidth(width));
+    }
+    if height == 0 || height > limits.max_texture_dimension_2d {
+        return Err(TextureError::TextureHeight(height));
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_backing_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    backing_texture_format: wgpu::TextureFormat,
+    surface_size: &SurfaceSize,
+    render_texture_format: wgpu::TextureFormat,
+    clear_color: wgpu::Color,
+    blend_state: wgpu::BlendState,
+) -> Result<
+    (
+        ultraviolet::Mat4,
+        wgpu::Extent3d,
+        wgpu::Texture,
+        ScalingRenderer,
+        usize,
+    ),
+    TextureError,
+> {
+    check_texture_size(device, width, height)?;
+
+    let scaling_matrix_inverse = ScalingMatrix::new(
+        (width as f32, height as f32),
+        (surface_size.width as f32, surface_size.height as f32),
+    )
+    .transform
+    .inversed();
+
+    let texture_extent = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("pixels_source_texture"),
+        size: texture_extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: backing_texture_format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let scaling_renderer = ScalingRenderer::new(
+        device,
+        &texture_view,
+        &texture_extent,
+        surface_size,
+        render_texture_format,
+        clear_color,
+        blend_state,
+    );
+
+    let texture_format_size = get_texture_format_size(backing_texture_format);
+    let pixels_buffer_size = ((width * height) as f32 * texture_format_size) as usize;
+
+    Ok((
+        scaling_matrix_inverse,
+        texture_extent,
+        texture,
+        scaling_renderer,
+        pixels_buffer_size,
+    ))
+}
+
+#[rustfmt::skip]
+#[inline]
+const fn get_texture_format_size(texture_format: wgpu::TextureFormat) -> f32 {
+    use wgpu::{AstcBlock::*, TextureFormat::*};
+
+    // TODO: Use constant arithmetic when supported.
+    // See: https://github.com/rust-lang/rust/issues/57241
+    match texture_format {
+        // Note that these sizes are typically estimates. For instance, GPU vendors decide whether
+        // their implementation uses 5 or 8 bytes per texel for formats like `Depth32PlusStencil8`.
+        // In cases where it is unclear, we choose to overestimate.
+        //
+        // See:
+        // - https://gpuweb.github.io/gpuweb/#plain-color-formats
+        // - https://gpuweb.github.io/gpuweb/#depth-formats
+        // - https://gpuweb.github.io/gpuweb/#packed-formats
+
+        // 8-bit formats, 8 bits per component
+        R8Unorm
+        | R8Snorm
+        | R8Uint
+        | R8Sint
+        | Stencil8 => 1.0, // 8.0 / 8.0
+
+        // 16-bit formats, 8 bits per component
+        R16Uint
+        | R16Sint
+        | R16Float
+        | R16Unorm
+        | R16Snorm
+        | Rg8Unorm
+        | Rg8Snorm
+        | Rg8Uint
+        | Rg8Sint
+        | Rgb9e5Ufloat
+        | Depth16Unorm => 2.0, // 16.0 / 8.0
+
+        // 32-bit formats, 8 bits per component
+        R32Uint
+        | R32Sint
+        | R32Float
+        | Rg16Uint
+        | Rg16Sint
+        | Rg16Float
+        | Rg16Unorm
+        | Rg16Snorm
+        | Rgba8Unorm
+        | Rgba8UnormSrgb
+        | Rgba8Snorm
+        | Rgba8Uint
+        | Rgba8Sint
+        | Bgra8Unorm
+        | Bgra8UnormSrgb
+        | Rgb10a2Unorm
+        | Rg11b10Float
+        | Depth32Float
+        | Depth24Plus
+        | Depth24PlusStencil8 => 4.0, // 32.0 / 8.0
+
+        // 64-bit formats, 8 bits per component
+        Rg32Uint
+        | Rg32Sint
+        | Rg32Float
+        | Rgba16Uint
+        | Rgba16Sint
+        | Rgba16Float
+        | Rgba16Unorm
+        | Rgba16Snorm
+        | Depth32FloatStencil8 => 8.0, // 64.0 / 8.0
+
+        // 128-bit formats, 8 bits per component
+        Rgba32Uint
+        | Rgba32Sint
+        | Rgba32Float => 16.0, // 128.0 / 8.0
+
+        // Compressed formats
+
+        // 4x4 blocks, 8 bytes per block
+        Bc1RgbaUnorm
+        | Bc1RgbaUnormSrgb
+        | Bc4RUnorm
+        | Bc4RSnorm
+        | Etc2Rgb8Unorm
+        | Etc2Rgb8UnormSrgb
+        | Etc2Rgb8A1Unorm
+        | Etc2Rgb8A1UnormSrgb
+        | EacR11Unorm
+        | EacR11Snorm => 0.5, // 4.0 * 4.0 / 8.0
+
+        // 4x4 blocks, 16 bytes per block
+        Bc2RgbaUnorm
+        | Bc2RgbaUnormSrgb
+        | Bc3RgbaUnorm
+        | Bc3RgbaUnormSrgb
+        | Bc5RgUnorm
+        | Bc5RgSnorm
+        | Bc6hRgbUfloat
+        | Bc6hRgbSfloat
+        | Bc7RgbaUnorm
+        | Bc7RgbaUnormSrgb
+        | EacRg11Unorm
+        | EacRg11Snorm
+        | Etc2Rgba8Unorm
+        | Etc2Rgba8UnormSrgb
+        | Astc { block: B4x4, channel: _ } => 1.0, // 4.0 * 4.0 / 16.0
+
+        // 5x4 blocks, 16 bytes per block
+        Astc { block: B5x4, channel: _ } => 1.25, // 5.0 * 4.0 / 16.0
+
+        // 5x5 blocks, 16 bytes per block
+        Astc { block: B5x5, channel: _ } => 1.5625, // 5.0 * 5.0 / 16.0
+
+        // 6x5 blocks, 16 bytes per block
+        Astc { block: B6x5, channel: _ } => 1.875, // 6.0 * 5.0 / 16.0
+
+        // 6x6 blocks, 16 bytes per block
+        Astc { block: B6x6, channel: _ } => 2.25, // 6.0 * 6.0 / 16.0
+
+        // 8x5 blocks, 16 bytes per block
+        Astc { block: B8x5, channel: _ } => 2.5, // 8.0 * 5.0 / 16.0
+
+        // 8x6 blocks, 16 bytes per block
+        Astc { block: B8x6, channel: _ } => 3.0, // 8.0 * 6.0 / 16.0
+
+        // 8x8 blocks, 16 bytes per block
+        Astc { block: B8x8, channel: _ } => 4.0, // 8.0 * 8.0 / 16.0
+
+        // 10x5 blocks, 16 bytes per block
+        Astc { block: B10x5, channel: _ } => 3.125, // 10.0 * 5.0 / 16.0
+
+        // 10x6 blocks, 16 bytes per block
+        Astc { block: B10x6, channel: _ } => 3.75, // 10.0 * 6.0 / 16.0
+
+        // 10x8 blocks, 16 bytes per block
+        Astc { block: B10x8, channel: _ } => 5.0, // 10.0 * 8.0 / 16.0
+
+        // 10x10 blocks, 16 bytes per block
+        Astc { block: B10x10, channel: _ } => 6.25, // 10.0 * 10.0 / 16.0
+
+        // 12x10 blocks, 16 bytes per block
+        Astc { block: B12x10, channel: _ } => 7.5, // 12.0 * 10.0 / 16.0
+
+        // 12x12 blocks, 16 bytes per block
+        Astc { block: B12x12, channel: _ } => 9.0, // 12.0 * 12.0 / 16.0
+    }
+}
+
+../crates/pixpox_renderer/src/builder.rs end
+../crates/pixpox_renderer/src/camera.rs begin
+use log::debug;
+
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone)]
+pub struct Camera {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    max_width: u32,
+    max_height: u32,
+    min_width: u32,
+    min_height: u32,
+    aspect_ratio: f32,
+}
+
+impl Camera {
+    pub fn new(x: u32, y: u32, height: u32, width: u32, max_height: u32, max_width: u32) -> Self {
+        let aspect_ratio = width as f32 / height as f32;
+
+        Self {
+            x,
+            y,
+            width,
+            height,
+            max_height,
+            max_width,
+            min_width: (10 as f32 * aspect_ratio) as u32,
+            min_height: 10,
+            aspect_ratio,
+        }
+    }
+
+    fn move_origin(&mut self, x: i32, y: i32) {
+        self.x = (self.x as i32 + x).clamp(0, (self.max_width - self.width) as i32) as u32;
+        self.y = (self.y as i32 + y).clamp(0, (self.max_height - self.height) as i32) as u32;
+    }
+
+    pub fn zoom(&mut self, scale: f32) {
+        let old_center_x = self.x + self.width / 2;
+        let old_center_y = self.y + self.height / 2;
+
+        let mut new_width = (self.width as f32 * scale) as u32;
+        let mut new_height = (self.height as f32 * scale) as u32;
+
+        // Correct aspect ratio
+        if new_width as f32 / new_height as f32 > self.aspect_ratio {
+            new_width = (new_height as f32 * self.aspect_ratio) as u32;
+        } else {
+            new_height = (new_width as f32 / self.aspect_ratio) as u32;
+        }
+
+        // Keep width and height in bounds (also keeping original aspect ratio)
+        self.width = new_width.clamp(self.min_width, self.max_width);
+        self.height = new_height.clamp(self.min_height, self.max_height);
+
+        let new_origin_x = old_center_x as i32 - self.width as i32 / 2;
+        let new_origin_y = old_center_y as i32 - self.height as i32 / 2;
+
+        self.move_origin(new_origin_x - self.x as i32, new_origin_y - self.y as i32);
+    }
+
+    // move function with direction
+    pub fn move_direction(&mut self, direction: Direction) {
+        // calculate movement speed based on camera scale
+        let speed = (1.0 * self.get_scale()).ceil() as i32;
+
+        match direction {
+            Direction::Up => self.move_origin(0, -speed),
+            Direction::Down => self.move_origin(0, speed),
+            Direction::Left => self.move_origin(-speed, 0),
+            Direction::Right => self.move_origin(speed, 0),
+        }
+    }
+
+    // move function with delta
+    pub fn move_delta(&mut self, delta: (i32, i32)) {
+        self.move_origin(delta.0, delta.1);
+    }
+
+    // getters
+    pub fn get_x(&self) -> u32 {
+        self.x
+    }
+
+    pub fn get_y(&self) -> u32 {
+        self.y
+    }
+
+    pub fn get_width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn get_height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn get_dim(&mut self) -> (u32, u32) {
+        (0, 0)
+    }
+
+    pub fn get_scale(&self) -> f32 {
+        self.width as f32 / self.max_width as f32
+    }
+}
+
+../crates/pixpox_renderer/src/camera.rs end
+../crates/pixpox_renderer/src/lib.rs begin
+//! A tiny library providing a GPU-powered pixel buffer.
+//!
+//! [`Pixels`] represents a 2D pixel buffer with an explicit image resolution, making it ideal for
+//! prototyping simple pixel-based games, animations, and emulators. The pixel buffer is rendered
+//! entirely on the GPU, allowing developers to easily incorporate special effects with shaders and
+//! a customizable pipeline.
+//!
+//! The GPU interface is offered by [`wgpu`](https://crates.io/crates/wgpu), and is re-exported for
+//! your convenience. Use a windowing framework or context manager of your choice;
+//! [`winit`](https://crates.io/crates/winit) is a good place to start. Any windowing framework that
+//! uses [`raw-window-handle`](https://crates.io/crates/raw-window-handle) will work.
+//!
+//! # Environment variables
+//!
+//! Pixels will default to selecting the most powerful GPU and most modern graphics API available on
+//! the system, and these choices can be overridden with environment variables. These are the same
+//! vars supported by the [`wgpu` examples](https://github.com/gfx-rs/wgpu/tree/v0.10/wgpu#usage).
+//!
+//! * `WGPU_BACKEND`: Select the backend (aka graphics API).
+//!     * Supported values: `vulkan`, `metal`, `dx11`, `dx12`, `gl`, `webgpu`
+//!     * The default depends on capabilities of the host system, with `vulkan` being preferred on
+//!       Linux and Windows, and `metal` preferred on macOS.
+//! * `WGPU_ADAPTER_NAME`: Select an adapter (aka GPU) with substring matching.
+//!     * E.g. `1080` will match `NVIDIA GeForce 1080ti`
+//! * `WGPU_POWER_PREF`: Select an adapter (aka GPU) that meets the given power profile.
+//!     * Supported values: `low`, `high`
+//!     * The default is `low`. I.e. an integrated GPU will be preferred over a discrete GPU.
+//!
+//! Note that `WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF` are mutually exclusive and that
+//! `WGPU_ADAPTER_NAME` takes precedence.
+
+#![deny(clippy::all)]
+
+mod renderer;
+
+pub use crate::builder::{check_texture_size, PixelsBuilder};
+pub use crate::renderer::{ScalingMatrix, ScalingRenderer};
+pub use raw_window_handle;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use std::num::NonZeroU32;
+use thiserror::Error;
+pub use wgpu;
+pub mod gui;
+pub mod camera;
+pub use camera::{Camera, Direction};
+
+mod builder;
+
+/// A logical texture for a window surface.
+#[derive(Debug)]
+pub struct SurfaceTexture<'win, W: 'win + HasRawWindowHandle + HasRawDisplayHandle> {
+    window: &'win W,
+    size: SurfaceSize,
+}
+
+/// A logical texture size for a window surface.
+#[derive(Debug)]
+struct SurfaceSize {
+    width: u32,
+    height: u32,
+}
+
+/// Provides the internal state for custom shaders.
+///
+/// A reference to this struct is given to the `render_function` closure when using
+/// [`Pixels::render_with`].
+#[derive(Debug)]
+pub struct PixelsContext {
+    /// The `Device` allows creating GPU resources.
+    pub device: wgpu::Device,
+
+    /// The `Queue` provides access to the GPU command queue.
+    pub queue: wgpu::Queue,
+
+    surface: wgpu::Surface,
+
+    /// This is the texture that your raw data is copied to by [`Pixels::render`] or
+    /// [`Pixels::render_with`].
+    pub texture: wgpu::Texture,
+
+    /// Provides access to the texture size.
+    pub texture_extent: wgpu::Extent3d,
+    pub texture_format: wgpu::TextureFormat,
+
+    /// Defines the "data rate" for the raw texture data. This is effectively the "bytes per pixel"
+    /// count.
+    ///
+    /// Compressed textures may have less than one byte per pixel.
+    pub texture_format_size: f32,
+
+    /// A default renderer to scale the input texture to the screen size.
+    pub scaling_renderer: ScalingRenderer,
+}
+
+/// Represents a 2D pixel buffer with an explicit image resolution.
+///
+/// See [`PixelsBuilder`] for building a customized pixel buffer.
+#[derive(Debug)]
+pub struct Pixels {
+    context: PixelsContext,
+    surface_size: SurfaceSize,
+    present_mode: wgpu::PresentMode,
+    render_texture_format: wgpu::TextureFormat,
+    surface_texture_format: wgpu::TextureFormat,
+    blend_state: wgpu::BlendState,
+    alpha_mode: wgpu::CompositeAlphaMode,
+
+    // Pixel buffer
+    pixels: Vec<u8>,
+
+    // The inverse of the scaling matrix used by the renderer
+    // Used to convert physical coordinates back to pixel coordinates (for the mouse)
+    scaling_matrix_inverse: ultraviolet::Mat4,
+}
+
+/// All the ways in which creating a pixel buffer can fail.
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum Error {
+    /// No suitable [`wgpu::Adapter`] found
+    #[error("No suitable `wgpu::Adapter` found.")]
+    AdapterNotFound,
+    /// Equivalent to [`wgpu::RequestDeviceError`]
+    #[error("No wgpu::Device found.")]
+    DeviceNotFound(#[from] wgpu::RequestDeviceError),
+    /// Equivalent to [`wgpu::SurfaceError`]
+    #[error("The GPU failed to acquire a surface frame.")]
+    Surface(#[from] wgpu::SurfaceError),
+    /// Equivalent to [`wgpu::CreateSurfaceError`]
+    #[error("Unable to create a surface.")]
+    CreateSurface(#[from] wgpu::CreateSurfaceError),
+    /// Equivalent to [`TextureError`]
+    #[error("Texture creation failed: {0}")]
+    InvalidTexture(#[from] TextureError),
+    /// User-defined error from custom render function
+    #[error("User-defined error.")]
+    UserDefined(#[from] DynError),
+}
+
+type DynError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// All the ways in which creating a texture can fail.
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum TextureError {
+    /// Unable to create a backing texture; Width is either 0 or greater than GPU limits
+    #[error("Texture width is invalid: {0}")]
+    TextureWidth(u32),
+    /// Unable to create a backing texture; Height is either 0 or greater than GPU limits
+    #[error("Texture height is invalid: {0}")]
+    TextureHeight(u32),
+}
+
+impl<'win, W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceTexture<'win, W> {
+    /// Create a logical texture for a window surface.
+    ///
+    /// It is recommended (but not required) that the `width` and `height` are equivalent to the
+    /// physical dimensions of the `surface`. E.g. scaled by the HiDPI factor.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use pixels::SurfaceTexture;
+    /// use winit::event_loop::EventLoop;
+    /// use winit::window::Window;
+    ///
+    /// let event_loop = EventLoop::new();
+    /// let window = Window::new(&event_loop).unwrap();
+    /// let size = window.inner_size();
+    ///
+    /// let surface_texture = SurfaceTexture::new(size.width, size.height, &window);
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when `width` or `height` are 0.
+    pub fn new(width: u32, height: u32, window: &'win W) -> Self {
+        assert!(width > 0);
+        assert!(height > 0);
+
+        let size = SurfaceSize { width, height };
+
+        Self { window, size }
+    }
+}
+
+impl Pixels {
+    /// Create a pixel buffer instance with default options.
+    ///
+    /// Any ratio differences between the pixel buffer texture size and surface texture size will
+    /// result in a border being added around the pixel buffer texture to maintain an integer
+    /// scaling ratio.
+    ///
+    /// For instance, a pixel buffer with `320x240` can be scaled to a surface texture with sizes
+    /// `320x240`, `640x480`, `960x720`, etc. without adding a border because these are exactly
+    /// 1x, 2x, and 3x scales, respectively.
+    ///
+    /// This method blocks the current thread, making it unusable on Web targets. Use
+    /// [`Pixels::new_async`] for a non-blocking alternative.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new(320, 240, surface_texture)?;
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a [`wgpu::Adapter`] cannot be found.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `width` or `height` are 0.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn new<W: HasRawWindowHandle + HasRawDisplayHandle>(
+        width: u32,
+        height: u32,
+        surface_texture: SurfaceTexture<'_, W>,
+    ) -> Result<Self, Error> {
+        PixelsBuilder::new(width, height, surface_texture).build()
+    }
+
+    /// Asynchronously create a pixel buffer instance with default options.
+    ///
+    /// See [`Pixels::new`] for more information.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn test() -> Result<(), pixels::Error> {
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new_async(320, 240, surface_texture).await?;
+    /// # Ok::<(), pixels::Error>(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a [`wgpu::Adapter`] cannot be found.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `width` or `height` are 0.
+    pub async fn new_async<W: HasRawWindowHandle + HasRawDisplayHandle>(
+        width: u32,
+        height: u32,
+        surface_texture: SurfaceTexture<'_, W>,
+    ) -> Result<Self, Error> {
+        PixelsBuilder::new(width, height, surface_texture)
+            .build_async()
+            .await
+    }
+
+    /// Change the clear color.
+    ///
+    /// Allows customization of the background color and the border drawn for non-integer scale
+    /// values.
+    ///
+    /// ```no_run
+    /// use pixels::wgpu::Color;
+    ///
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new(320, 240, surface_texture)?;
+    ///
+    /// // Set clear color to red.
+    /// pixels.set_clear_color(Color::RED);
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn set_clear_color(&mut self, color: wgpu::Color) {
+        self.context.scaling_renderer.clear_color = color;
+    }
+
+    /// Resize the pixel buffer and zero its contents.
+    ///
+    /// This does not resize the surface upon which the pixel buffer texture is rendered. Use
+    /// [`Pixels::resize_surface`] to change the size of the surface texture.
+    ///
+    /// The pixel buffer will be fit onto the surface texture as best as possible by scaling to the
+    /// nearest integer, e.g. 2x, 3x, 4x, etc. A border will be added around the pixel buffer
+    /// texture for non-integer scaling ratios.
+    ///
+    /// Call this method to change the virtual screen resolution. E.g. when you want your pixel
+    /// buffer to be resized from `640x480` to `800x600`.
+    ///
+    /// # Errors
+    ///
+    /// - [`TextureError::TextureWidth`] when `width` is 0 or greater than GPU texture limits.
+    /// - [`TextureError::TextureHeight`] when `height` is 0 or greater than GPU texture limits.
+    pub fn resize_buffer(&mut self, width: u32, height: u32) -> Result<(), TextureError> {
+        // Recreate the backing texture
+        let (scaling_matrix_inverse, texture_extent, texture, scaling_renderer, pixels_buffer_size) =
+            builder::create_backing_texture(
+                &self.context.device,
+                // Backing texture values
+                width,
+                height,
+                self.context.texture_format,
+                // Render texture values
+                &self.surface_size,
+                self.render_texture_format,
+                self.context.scaling_renderer.clear_color,
+                self.blend_state,
+            )?;
+
+        self.scaling_matrix_inverse = scaling_matrix_inverse;
+        self.context.texture_extent = texture_extent;
+        self.context.texture = texture;
+        self.context.scaling_renderer = scaling_renderer;
+
+        // Resize the pixel buffer
+        self.pixels
+            .resize_with(pixels_buffer_size, Default::default);
+
+        Ok(())
+    }
+
+    /// Resize the surface upon which the pixel buffer texture is rendered.
+    ///
+    /// This does not resize the pixel buffer. Use [`Pixels::resize_buffer`] to change the size of
+    /// the pixel buffer.
+    ///
+    /// The pixel buffer texture will be fit onto the surface texture as best as possible by scaling
+    /// to the nearest integer, e.g. 2x, 3x, 4x, etc. A border will be added around the pixel buffer
+    /// texture for non-integer scaling ratios.
+    ///
+    /// Call this method in response to a resize event from your window manager. The size expected
+    /// is in physical pixel units. Does nothing when `width` or `height` are 0.
+    ///
+    /// # Errors
+    ///
+    /// - [`TextureError::TextureWidth`] when `width` is 0 or greater than GPU texture limits.
+    /// - [`TextureError::TextureHeight`] when `height` is 0 or greater than GPU texture limits.
+    pub fn resize_surface(&mut self, width: u32, height: u32) -> Result<(), TextureError> {
+        check_texture_size(&self.context.device, width, height)?;
+
+        // Update SurfaceTexture dimensions
+        self.surface_size.width = width;
+        self.surface_size.height = height;
+
+        // Update ScalingMatrix for mouse transformation
+        self.scaling_matrix_inverse = ScalingMatrix::new(
+            (
+                self.context.texture_extent.width as f32,
+                self.context.texture_extent.height as f32,
+            ),
+            (width as f32, height as f32),
+        )
+        .transform
+        .inversed();
+
+        // Reconfigure the surface
+        self.reconfigure_surface();
+
+        // Update state for all render passes
+        self.context
+            .scaling_renderer
+            .resize(&self.context.queue, width, height);
+
+        Ok(())
+    }
+
+    /// Draw this pixel buffer to the configured [`SurfaceTexture`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when [`wgpu::Surface::get_current_texture`] fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new(320, 240, surface_texture)?;
+    ///
+    /// // Clear the pixel buffer
+    /// let frame = pixels.get_frame_mut();
+    /// for pixel in frame.chunks_exact_mut(4) {
+    ///     pixel[0] = 0x00; // R
+    ///     pixel[1] = 0x00; // G
+    ///     pixel[2] = 0x00; // B
+    ///     pixel[3] = 0xff; // A
+    /// }
+    ///
+    /// // Draw it to the `SurfaceTexture`
+    /// pixels.render()?;
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn render(&self) -> Result<(), Error> {
+        self.render_with(|encoder, render_target, context| {
+            context.scaling_renderer.render(encoder, render_target);
+
+            Ok(())
+        })
+    }
+
+    /// Draw this pixel buffer to the configured [`SurfaceTexture`] using a custom user-provided
+    /// render function.
+    ///
+    /// Provides access to a [`wgpu::CommandEncoder`], a [`wgpu::TextureView`] from the surface
+    /// which you can use to render to the screen, and a [`PixelsContext`] with all of the internal
+    /// `wgpu` context.
+    ///
+    /// The render function must return a `Result`. This allows fallible render functions to be
+    /// handled gracefully. The boxed `Error` will be made available in the [`Error::UserDefined`]
+    /// variant returned by `render_with()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either [`wgpu::Surface::get_current_texture`] or the provided render
+    /// function fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new(320, 240, surface_texture)?;
+    ///
+    /// // Clear the pixel buffer
+    /// let frame = pixels.get_frame_mut();
+    /// for pixel in frame.chunks_exact_mut(4) {
+    ///     pixel[0] = 0x00; // R
+    ///     pixel[1] = 0x00; // G
+    ///     pixel[2] = 0x00; // B
+    ///     pixel[3] = 0xff; // A
+    /// }
+    ///
+    /// // Draw it to the `SurfaceTexture`
+    /// pixels.render_with(|encoder, render_target, context| {
+    ///     context.scaling_renderer.render(encoder, render_target);
+    ///     // etc...
+    ///     Ok(())
+    /// })?;
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn render_with<F>(&self, render_function: F) -> Result<(), Error>
+    where
+        F: FnOnce(
+            &mut wgpu::CommandEncoder,
+            &wgpu::TextureView,
+            &PixelsContext,
+        ) -> Result<(), DynError>,
+    {
+        let frame = self
+            .context
+            .surface
+            .get_current_texture()
+            .or_else(|err| match err {
+                wgpu::SurfaceError::Outdated => {
+                    // Reconfigure the surface to mitigate race condition on window resize.
+                    // See https://github.com/parasyte/pixels/issues/121
+                    self.reconfigure_surface();
+                    self.context.surface.get_current_texture()
+                },
+                err => Err(err),
+            })?;
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("pixels_command_encoder"),
+                });
+
+        // Update the pixel buffer texture view
+        let bytes_per_row =
+            (self.context.texture_extent.width as f32 * self.context.texture_format_size) as u32;
+
+        self.context.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.context.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &self.pixels,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: NonZeroU32::new(bytes_per_row),
+                rows_per_image: NonZeroU32::new(self.context.texture_extent.height),
+            },
+            self.context.texture_extent,
+        );
+
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Call the user's render function.
+        (render_function)(&mut encoder, &view, &self.context)?;
+
+        self.context.queue.submit(Some(encoder.finish()));
+        frame.present();
+        Ok(())
+    }
+
+    /// Reconfigure the surface.
+    ///
+    /// Call this when the surface or presentation mode needs to be changed.
+    pub(crate) fn reconfigure_surface(&self) {
+        self.context.surface.configure(
+            &self.context.device,
+            &wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: self.surface_texture_format,
+                width: self.surface_size.width,
+                height: self.surface_size.height,
+                present_mode: self.present_mode,
+                alpha_mode: self.alpha_mode,
+                view_formats: vec![],
+            },
+        );
+    }
+
+    /// Get a mutable byte slice for the pixel buffer. The buffer is _not_ cleared for you; it will
+    /// retain the previous frame's contents until you clear it yourself.
+    pub fn get_frame_mut(&mut self) -> &mut [u8] {
+        &mut self.pixels
+    }
+
+    /// Get an immutable byte slice for the pixel buffer.
+    ///
+    /// This may be useful for operations that must sample the buffer, such as blending pixel
+    /// colours directly into it.
+    pub fn get_frame(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    /// Calculate the pixel location from a physical location on the window,
+    /// dealing with window resizing, scaling, and margins. Takes a physical
+    /// position (x, y) within the window, and returns a pixel position (x, y).
+    ///
+    /// The location must be given in physical units (for example, winit's `PhysicalLocation`)
+    ///
+    /// If the given physical position is outside of the drawing area, this
+    /// function returns an `Err` value with the pixel coordinates outside of
+    /// the screen, using isize instead of usize.
+    ///
+    /// ```no_run
+    /// use winit::dpi::PhysicalPosition;
+    ///
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new(320, 240, surface_texture)?;
+    ///
+    /// // A cursor position in physical units
+    /// let cursor_position: (f32, f32) = PhysicalPosition::new(0.0, 0.0).into();
+    ///
+    /// // Convert it to a pixel location
+    /// let pixel_position: (usize, usize) = pixels.window_pos_to_pixel(cursor_position)
+    ///     // Clamp the output to within the screen
+    ///     .unwrap_or_else(|pos| pixels.clamp_pixel_pos(pos));
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn window_pos_to_pixel(
+        &self,
+        physical_position: (f32, f32),
+    ) -> Result<(usize, usize), (isize, isize)> {
+        let physical_width = self.surface_size.width as f32;
+        let physical_height = self.surface_size.height as f32;
+
+        let pixels_width = self.context.texture_extent.width as f32;
+        let pixels_height = self.context.texture_extent.height as f32;
+
+        let pos = ultraviolet::Vec4::new(
+            (physical_position.0 / physical_width - 0.5) * pixels_width,
+            (physical_position.1 / physical_height - 0.5) * pixels_height,
+            0.0,
+            1.0,
+        );
+
+        let pos = self.scaling_matrix_inverse * pos;
+        let offset_width = pixels_width.min(physical_width) / 2.0;
+        let offset_height = pixels_height.min(physical_height) / 2.0;
+
+        let pixel_x = (pos.x / pos.w + offset_width).floor() as isize;
+        let pixel_y = (pos.y / pos.w + offset_height).floor() as isize;
+
+        if pixel_x < 0
+            || pixel_x >= self.context.texture_extent.width as isize
+            || pixel_y < 0
+            || pixel_y >= self.context.texture_extent.height as isize
+        {
+            Err((pixel_x, pixel_y))
+        } else {
+            Ok((pixel_x as usize, pixel_y as usize))
+        }
+    }
+
+    /// Clamp a pixel position to the pixel buffer texture size.
+    ///
+    /// This can be used to clamp the `Err` value returned by [`Pixels::window_pos_to_pixel`]
+    /// to a position clamped within the drawing area.
+    ///
+    /// ```no_run
+    /// # use pixels::Pixels;
+    /// # let window = pixels_mocks::Rwh;
+    /// # let surface_texture = pixels::SurfaceTexture::new(320, 240, &window);
+    /// let mut pixels = Pixels::new(320, 240, surface_texture)?;
+    ///
+    /// let pixel_pos = pixels.clamp_pixel_pos((-19, 20));
+    /// assert_eq!(pixel_pos, (0, 20));
+    ///
+    /// let pixel_pos = pixels.clamp_pixel_pos((11, 3000));
+    /// assert_eq!(pixel_pos, (11, 239));
+    /// # Ok::<(), pixels::Error>(())
+    /// ```
+    pub fn clamp_pixel_pos(&self, pos: (isize, isize)) -> (usize, usize) {
+        (
+            pos.0
+                .clamp(0, self.context.texture_extent.width as isize - 1) as usize,
+            pos.1
+                .clamp(0, self.context.texture_extent.height as isize - 1) as usize,
+        )
+    }
+
+    /// Provides access to the internal [`wgpu::Device`].
+    pub fn device(&self) -> &wgpu::Device {
+        &self.context.device
+    }
+
+    /// Provides access to the internal [`wgpu::Queue`].
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.context.queue
+    }
+
+    /// Provides access to the internal source [`wgpu::Texture`].
+    ///
+    /// This is the pre-scaled texture copied from the pixel buffer.
+    pub fn texture(&self) -> &wgpu::Texture {
+        &self.context.texture
+    }
+
+    /// Provides access to the internal [`PixelsContext`].
+    pub fn context(&self) -> &PixelsContext {
+        &self.context
+    }
+
+    /// Get the surface texture format.
+    ///
+    /// This texture format may be chosen automatically by the surface. See
+    /// [`PixelsBuilder::surface_texture_format`] for more information.
+    pub fn surface_texture_format(&self) -> wgpu::TextureFormat {
+        self.surface_texture_format
+    }
+
+    /// Get the render texture format.
+    ///
+    ///
+    /// See [`PixelsBuilder::render_texture_format`] for more information.
+    pub fn render_texture_format(&self) -> wgpu::TextureFormat {
+        self.render_texture_format
+    }
+}
+
+../crates/pixpox_renderer/src/lib.rs end
+../crates/pixpox_renderer/src/gui.rs begin
+use imgui::{ProgressBar, Ui};
+use pixpox_utils::Stats;
+
+use crate::{wgpu, Pixels, PixelsContext};
+use std::time::Instant;
+
+pub struct GuiParent<'a> {
+    label: &'static str,
+    children: Vec<&'a mut GuiChild<'a>>,
+}
+
+pub struct GuiChild<'a> {
+    label: &'static str,
+    cb: &'a mut dyn FnMut(&mut Ui, &mut bool, &Stats),
+    state: &'a mut bool,
+}
+
+impl<'a> GuiChild<'a> {
+    pub fn new(label: &'static str, cb: &'a mut dyn FnMut(&mut Ui, &mut bool, &Stats), state: &'a mut bool) -> Self {
+        Self { label, cb, state }
+    }
+}
+
+/// Manages all state required for rendering Dear ImGui over `Pixels`.
+pub struct Gui<'a> {
+    imgui: imgui::Context,
+    platform: imgui_winit_support::WinitPlatform,
+    renderer: imgui_wgpu::Renderer,
+    last_frame: Instant,
+    last_cursor: Option<imgui::MouseCursor>,
+    gui_entries: Vec<GuiParent<'a>>,
+}
+
+impl<'a> Gui<'a> {
+    /// Create Dear ImGui.
+    pub fn new(window: &winit::window::Window, pixels: &Pixels) -> Self {
+        // Create Dear ImGui context
+        let mut imgui = imgui::Context::create();
+        imgui.set_ini_filename(None);
+
+        // Initialize winit platform support
+        let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
+        platform.attach_window(
+            imgui.io_mut(),
+            window,
+            imgui_winit_support::HiDpiMode::Default,
+        );
+
+        // Configure Dear ImGui fonts
+        let hidpi_factor = window.scale_factor();
+        let font_size = (13.0 * hidpi_factor) as f32;
+        imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+        imgui
+            .fonts()
+            .add_font(&[imgui::FontSource::DefaultFontData {
+                config: Some(imgui::FontConfig {
+                    oversample_h: 1,
+                    pixel_snap_h: true,
+                    size_pixels: font_size,
+                    ..Default::default()
+                }),
+            }]);
+
+        // Create Dear ImGui WGPU renderer
+        let device = pixels.device();
+        let queue = pixels.queue();
+        let config = imgui_wgpu::RendererConfig {
+            texture_format: pixels.render_texture_format(),
+            ..Default::default()
+        };
+        let renderer = imgui_wgpu::Renderer::new(&mut imgui, device, queue, config);
+
+        // Return GUI context
+        Self {
+            imgui,
+            platform,
+            renderer,
+            last_frame: Instant::now(),
+            last_cursor: None,
+            gui_entries: Vec::new(),
+        }
+    }
+
+    /// Prepare Dear ImGui.
+    pub fn prepare(
+        &mut self,
+        window: &winit::window::Window,
+    ) -> Result<(), winit::error::ExternalError> {
+        // Prepare Dear ImGui
+        let now = Instant::now();
+        self.imgui.io_mut().update_delta_time(now - self.last_frame);
+        self.last_frame = now;
+        self.platform.prepare_frame(self.imgui.io_mut(), window)
+    }
+
+    /// Render Dear ImGui.
+    pub fn render(
+        &mut self,
+        window: &winit::window::Window,
+        encoder: &mut wgpu::CommandEncoder,
+        render_target: &wgpu::TextureView,
+        context: &PixelsContext,
+        stats: &Stats
+    ) -> imgui_wgpu::RendererResult<()> {
+        // Start a new Dear ImGui frame and update the cursor
+        let ui = self.imgui.frame();
+
+        let mouse_cursor = ui.mouse_cursor();
+        if self.last_cursor != mouse_cursor {
+            self.last_cursor = mouse_cursor;
+            self.platform.prepare_render(ui, window);
+        }
+
+        // Draw windows and GUI elements here
+        ui.main_menu_bar(|| {
+            self.gui_entries.iter_mut().for_each(|parent| {
+                ui.menu(parent.label, || {
+                    parent.children.iter_mut().for_each(|child| {
+                        *child.state = ui.menu_item(child.label);
+                    })
+                })
+            });
+        });
+
+        self.gui_entries.iter_mut().for_each(|parent| {
+            parent.children.iter_mut().for_each(|child| {
+                if *child.state {
+                    (*child.cb)(ui, &mut *child.state, stats);
+                }
+            });
+        });
+
+        // Render Dear ImGui with WGPU
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("imgui"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: render_target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: true,
+                },
+            })],
+            depth_stencil_attachment: None,
+        });
+
+        self.renderer.render(
+            self.imgui.render(),
+            &context.queue,
+            &context.device,
+            &mut rpass,
+        )
+    }
+
+    /// Handle any outstanding events.
+    pub fn handle_event(
+        &mut self,
+        window: &winit::window::Window,
+        event: &winit::event::Event<()>,
+    ) {
+        self.platform
+            .handle_event(self.imgui.io_mut(), window, event);
+    }
+
+    pub fn register_parent(&mut self, label: &'static str) {
+        self.gui_entries.push(GuiParent {
+            label,
+            children: Vec::new(),
+        });
+    }
+
+    pub fn register_child(&mut self, parent_label: &'static str, child: &'a mut GuiChild<'a>) {
+        for parent in self.gui_entries.iter_mut() {
+            if parent.label == parent_label {
+                parent.children.push(child);
+                return;
+            }
+        }
+    }
+}
+
+../crates/pixpox_renderer/src/gui.rs end
+../crates/pixpox_renderer/src/types.rs begin
+use rand::Rng;
+
+pub struct Colors {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+pub struct Position {
+    x: u16,
+    y: u16,
+}
+
+pub enum PixelClass {
+    SAND,
+    WATER,
+    STONE,
+    IRON,
+}
+
+pub struct Pixel {
+    pub colors: Colors,
+    pub pos: Position,
+    pub class: PixelClass,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+}
+
+impl Vertex {
+    pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+
+    pub fn gen_random_array(n: u8) -> Vec<Vertex> {
+        let mut random_vertices: Vec<Vertex> = Vec::new();
+
+        for _ in 1..n {
+            let (r1, r2, r3) = (
+                rand::thread_rng().gen_range(0.0..1.0),
+                rand::thread_rng().gen_range(0.0..1.0),
+                rand::thread_rng().gen_range(0.0..1.0),
+            );
+
+            random_vertices.push(Vertex {
+                position: [r1, r2, r3],
+                color: [r1, r2, r3],
+            })
+        }
+
+        random_vertices
+    }
+}
+../crates/pixpox_renderer/src/types.rs end
+../crates/pixpox_renderer/src/renderer.rs begin
+use crate::SurfaceSize;
+use ultraviolet::Mat4;
+use wgpu::util::DeviceExt;
+
+/// The default renderer that scales your frame to the screen size.
+#[derive(Debug)]
+pub struct ScalingRenderer {
+    vertex_buffer: wgpu::Buffer,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    render_pipeline: wgpu::RenderPipeline,
+    pub(crate) clear_color: wgpu::Color,
+    width: f32,
+    height: f32,
+    clip_rect: (u32, u32, u32, u32),
+}
+
+impl ScalingRenderer {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        texture_view: &wgpu::TextureView,
+        texture_size: &wgpu::Extent3d,
+        surface_size: &SurfaceSize,
+        render_texture_format: wgpu::TextureFormat,
+        clear_color: wgpu::Color,
+        blend_state: wgpu::BlendState,
+    ) -> Self {
+        let shader = wgpu::include_wgsl!("shaders/scale.wgsl");
+        let module = device.create_shader_module(shader);
+
+        // Create a texture sampler with nearest neighbor
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("pixels_scaling_renderer_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 1.0,
+            compare: None,
+            anisotropy_clamp: None,
+            border_color: None,
+        });
+
+        // Create vertex buffer; array-of-array of position and texture coordinates
+        let vertex_data: [[f32; 2]; 3] = [
+            // One full-screen triangle
+            // See: https://github.com/parasyte/pixels/issues/180
+            [-1.0, -1.0],
+            [3.0, -1.0],
+            [-1.0, 3.0],
+        ];
+        let vertex_data_slice = bytemuck::cast_slice(&vertex_data);
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pixels_scaling_renderer_vertex_buffer"),
+            contents: vertex_data_slice,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let vertex_buffer_layout = wgpu::VertexBufferLayout {
+            array_stride: (vertex_data_slice.len() / vertex_data.len()) as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 0,
+                shader_location: 0,
+            }],
+        };
+
+        // Create uniform buffer
+        let matrix = ScalingMatrix::new(
+            (texture_size.width as f32, texture_size.height as f32),
+            (surface_size.width as f32, surface_size.height as f32),
+        );
+        let transform_bytes = matrix.as_bytes();
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pixels_scaling_renderer_matrix_uniform_buffer"),
+            contents: transform_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pixels_scaling_renderer_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(transform_bytes.len() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pixels_scaling_renderer_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Create pipeline
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pixels_scaling_renderer_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pixels_scaling_renderer_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: "vs_main",
+                buffers: &[vertex_buffer_layout],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_texture_format,
+                    blend: Some(blend_state),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            
+            multiview: None,
+        });
+
+        // Create clipping rectangle
+        let clip_rect = matrix.clip_rect();
+
+        Self {
+            vertex_buffer,
+            uniform_buffer,
+            bind_group,
+            render_pipeline,
+            clear_color,
+            width: texture_size.width as f32,
+            height: texture_size.height as f32,
+            clip_rect,
+        }
+    }
+
+    /// Draw the pixel buffer to the render target.
+    pub fn render(&self, encoder: &mut wgpu::CommandEncoder, render_target: &wgpu::TextureView) {
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("pixels_scaling_renderer_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: render_target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(self.clear_color),
+                    store: true,
+                },
+            })],
+            depth_stencil_attachment: None,
+        });
+        rpass.set_pipeline(&self.render_pipeline);
+        rpass.set_bind_group(0, &self.bind_group, &[]);
+        rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        rpass.set_scissor_rect(
+            self.clip_rect.0,
+            self.clip_rect.1,
+            self.clip_rect.2,
+            self.clip_rect.3
+        );
+        rpass.draw(0..3, 0..1);
+    }
+
+    /// Get the clipping rectangle for the scaling renderer.
+    ///
+    /// This rectangle defines the inner bounds of the surface texture, without the border.
+    pub fn clip_rect(&self) -> (u32, u32, u32, u32) {
+        self.clip_rect
+    }
+
+    pub(crate) fn resize(&mut self, queue: &wgpu::Queue, width: u32, height: u32) {
+        let matrix = ScalingMatrix::new((self.width, self.height), (width as f32, height as f32));
+        let transform_bytes = matrix.as_bytes();
+        queue.write_buffer(&self.uniform_buffer, 0, transform_bytes);
+
+        self.clip_rect = matrix.clip_rect();
+    }
+}
+
+#[derive(Debug)]
+pub struct ScalingMatrix {
+    pub(crate) transform: Mat4,
+    clip_rect: (u32, u32, u32, u32),
+}
+
+impl ScalingMatrix {
+    // texture_size is the dimensions of the drawing texture
+    // screen_size is the dimensions of the surface being drawn to
+    pub(crate) fn new(texture_size: (f32, f32), screen_size: (f32, f32)) -> Self {
+        let (texture_width, texture_height) = texture_size;
+        let (screen_width, screen_height) = screen_size;
+
+        let width_ratio = (screen_width / texture_width).max(1.0);
+        let height_ratio = (screen_height / texture_height).max(1.0);
+
+        // Get smallest scale size
+        let scale = width_ratio.clamp(1.0, height_ratio).floor();
+
+        let scaled_width = texture_width * scale;
+        let scaled_height = texture_height * scale;
+
+        // Create a transformation matrix
+        let sw = scaled_width / screen_width;
+        let sh = scaled_height / screen_height;
+        let tx = (screen_width / 2.0).fract() / screen_width;
+        let ty = (screen_height / 2.0).fract() / screen_height;
+        #[rustfmt::skip]
+        let transform: [f32; 16] = [
+            sw,  0.0, 0.0, 0.0,
+            0.0, sh,  0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            tx,  ty,  0.0, 1.0,
+        ];
+
+        // Create a clipping rectangle
+        let clip_rect = {
+            let scaled_width = scaled_width.min(screen_width);
+            let scaled_height = scaled_height.min(screen_height);
+            let x = ((screen_width - scaled_width) / 2.0) as u32;
+            let y = ((screen_height - scaled_height) / 2.0) as u32;
+
+            (x, y, scaled_width as u32, scaled_height as u32)
+        };
+
+        Self {
+            transform: Mat4::from(transform),
+            clip_rect,
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        self.transform.as_byte_slice()
+    }
+
+    pub(crate) fn clip_rect(&self) -> (u32, u32, u32, u32) {
+        self.clip_rect
+    }
+}
+../crates/pixpox_renderer/src/renderer.rs end
+../crates/pixpox_renderer/src/shaders/scale.wgsl begin
+// Vertex shader bindings
+
+struct VertexOutput {
+    @location(0) tex_coord: vec2<f32>,
+    @builtin(position) position: vec4<f32>,
+}
+
+struct Locals {
+    transform: mat4x4<f32>,
+}
+@group(0) @binding(2) var<uniform> r_locals: Locals;
+
+@vertex
+fn vs_main(
+    @location(0) position: vec2<f32>,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.tex_coord = fma(position, vec2<f32>(0.5, -0.5), vec2<f32>(0.5, 0.5));
+    out.position = r_locals.transform * vec4<f32>(position, 0.0, 1.0);
+    return out;
+}
+
+// Fragment shader bindings
+
+@group(0) @binding(0) var r_tex_color: texture_2d<f32>;
+@group(0) @binding(1) var r_tex_sampler: sampler;
+
+@fragment
+fn fs_main(@location(0) tex_coord: vec2<f32>) -> @location(0) vec4<f32> {
+    return textureSample(r_tex_color, r_tex_sampler, tex_coord);
+}
+
+../crates/pixpox_renderer/src/shaders/scale.wgsl end
+../crates/pixpox_renderer/src/shaders/shader.wgsl begin
+// Vertex shader
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) color: vec3<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
+
+
+@vertex
+fn vs_main(
+    model: VertexInput,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.color = model.color;
+    out.clip_position = vec4<f32>(model.position, 1.0);
+    return out;
+}
+
+
+// Fragment shader
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.color, 1.0);
+}
+
+ 
+../crates/pixpox_renderer/src/shaders/shader.wgsl end
+../crates/pixpox_utils/Cargo.toml begin
+[package]
+name = "pixpox_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = "0.4.17"
+rand = "0.8.5"
+rayon = "1.6.1"
+
+../crates/pixpox_utils/Cargo.toml end
+../crates/pixpox_utils/src/lib.rs begin
+pub mod stats;
+pub use stats::Stats;
+
+pub mod CA;
+pub use CA::conway;
+pub use CA::cell_realm;
+
+/// A macro similar to `vec![$elem; $size]` which returns a boxed array.
+///
+/// ```rustc
+///     let _: Box<[u8; 1024]> = box_array![0; 1024];
+/// ```
+#[macro_export]
+macro_rules! box_array {
+    ($val:expr ; $len:expr) => {{
+        // Use a generic function so that the pointer cast remains type-safe
+        fn vec_to_boxed_array<T>(vec: Vec<T>) -> Box<[T; $len]> {
+            let boxed_slice = vec.into_boxed_slice();
+
+            let ptr = ::std::boxed::Box::into_raw(boxed_slice) as *mut [T; $len];
+
+            unsafe { Box::from_raw(ptr) }
+        }
+
+        vec_to_boxed_array(vec![$val; $len])
+    }};
+}
+
+pub fn map_range(from_range: (f64, f64), to_range: (f64, f64), s: f64) -> f64 {
+    to_range.0 + (s - from_range.0) * (to_range.1 - to_range.0) / (from_range.1 - from_range.0)
+}
+../crates/pixpox_utils/src/lib.rs end
+../crates/pixpox_utils/src/stats.rs begin
+use std::{time::{self, Instant}, collections::HashMap, fmt::format};
+
+pub struct Stats {
+    last_update: time::Instant,
+    fps: f32,
+    acc: Vec<f32>,
+    sectors: HashMap<&'static str, f32>
+}
+
+impl Stats {
+    pub fn new() -> Self {
+        Self {
+            last_update: Instant::now(),
+            fps: 0.0,
+            acc: Vec::with_capacity(100000),
+            sectors: HashMap::new()
+        }
+    }
+
+    pub fn new_tick(&mut self) {
+        let curr_diff = Instant::now() - self.last_update;
+
+        self.fps = 1.0 / curr_diff.as_secs_f32();
+        self.acc.push(self.fps);
+        self.last_update = Instant::now();
+    }
+
+    pub fn get_fps(&self) -> f32 {
+        self.fps
+    }
+
+    pub fn get_fps_as_string(&self) -> String {
+        self.fps.to_string()
+    }
+
+    pub fn get_average_fps(&self) -> f32 {
+        self.acc.iter().sum::<f32>() as f32 / self.acc.len() as f32
+    }
+
+    pub fn get_mean_fps(&self) -> f32 {
+        // self.acc.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // self.acc[self.acc.len() / 2]
+        0.0
+    }
+
+    pub fn update_sector(&mut self, label: &'static str, value: f32) {
+        self.sectors.insert(label, value);
+    }
+
+    pub fn get_formatted_stats(&self) -> Vec<String> {
+        let mut ret = Vec::new();
+
+        ret.push("fps: ".to_owned() + &self.get_fps().to_string());
+        ret.push("avg fps: ".to_owned() + &self.get_average_fps().to_string());
+        ret.push("mean fps: ".to_owned() + &self.get_mean_fps().to_string());
+    
+        for (k, v) in self.sectors.iter() {
+            let s = format!("{}: {}", k, v);
+            ret.push(s);
+        };
+
+        ret
+    }
+}
+
+../crates/pixpox_utils/src/stats.rs end
+../crates/pixpox_utils/src/CA/cell_realm.rs begin
+use log::{debug, error, info};
+use rand::Rng;
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
+use std::collections::HashMap;
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum CellType {
+    WATER,
+    FIRE,
+    STONE,
+    WOOD,
+    EMPTY,
+}
+
+#[derive(Copy, Clone)]
+pub struct Cell {
+    cell_type: CellType,
+    flow: Option<(i32, i32)>,
+}
+
+impl Cell {
+    pub fn new(cell_type: CellType, flow: Option<(i32, i32)>) -> Self {
+        Self { cell_type, flow }
+    }
+
+    pub fn get_color(&self) -> [u8; 4] {
+        match self.cell_type {
+            CellType::WATER => [0, 0, 200, 255],
+            CellType::FIRE => [255, 0, 0, 0],
+            CellType::STONE => [100, 100, 100, 255],
+            CellType::WOOD => [139, 69, 19, 255],
+            CellType::EMPTY => [0, 0, 0, 0],
+        }
+    }
+
+    pub fn next_state(&self, n: Vec<Cell>) -> Cell {
+        match self.cell_type {
+            CellType::WATER => {
+                if n[6].cell_type == CellType::EMPTY {
+                    return Cell::new(CellType::EMPTY, Some((0, 1)));
+                }
+
+                // If both left and right are empty
+                if n[3].cell_type == CellType::EMPTY && n[4].cell_type == CellType::EMPTY {
+                    let mut rng = rand::thread_rng();
+                    let flow_x = if rng.gen_bool(0.5) { 1 } else { -1 };
+                    return Cell::new(CellType::EMPTY, Some((flow_x, 0)));
+                }
+
+                if n[3].cell_type == CellType::WATER && n[4].cell_type == CellType::EMPTY {
+                    return Cell::new(CellType::EMPTY, Some((1, 0)));
+                }
+
+                if n[3].cell_type == CellType::EMPTY && n[4].cell_type == CellType::WATER {
+                    return Cell::new(CellType::EMPTY, Some((-1, 0)));
+                }
+
+                Cell::new(CellType::WATER, Some((0, 0)))
+            },
+            CellType::FIRE => Cell::new(CellType::FIRE, Some((0, 0))),
+            CellType::STONE => Cell::new(CellType::STONE, Some((0, 0))),
+            CellType::WOOD => Cell::new(CellType::WOOD, Some((0, 0))),
+            CellType::EMPTY => {
+                // Above
+                if n[1].flow.unwrap().1 > 0 {
+                    return Cell::new(CellType::WATER, Some((0, 0)));
+                }
+
+                // Left
+                if n[3].flow.unwrap().0 > 0 {
+                    return Cell::new(CellType::WATER, Some((0, 0)));
+                }
+
+                // Right
+                if n[4].flow.unwrap().0 < 0 {
+                    return Cell::new(CellType::WATER, Some((0, 0)));
+                }
+
+                Cell::new(CellType::EMPTY, Some((0, 0)))
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CellRealm {
+    height: u32,
+    width: u32,
+    cells: Vec<Cell>,
+}
+
+impl CellRealm {
+    pub fn new(height: u32, width: u32) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut cells: Vec<Cell> = Vec::new();
+
+        for _ in 0..height {
+            for _ in 0..width {
+                let cell = Cell::new(CellType::EMPTY, None);
+                cells.push(cell);
+            }
+        }
+
+        Self {
+            cells,
+            width: width,
+            height: height,
+        }
+    }
+
+    /// Private function to map between real pos and idx
+    fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.width as isize + pos.0;
+        idx as usize
+    }
+
+    // Private function to map idx to real pos
+    fn get_pos(&self, idx: isize) -> (isize, isize) {
+        let x = idx % self.width as isize;
+        let y = idx / self.width as isize;
+
+        (x, y)
+    }
+
+    pub fn set_pos(&mut self, pos: (isize, isize), cell: CellType) {
+        let idx = self.get_idx(pos);
+        self.cells[idx] = Cell::new(cell, None);
+    }
+
+    /// Implement Bresenham's line algorithm
+    pub fn set_line(&mut self, pos1: (isize, isize), pos2: (isize, isize), cell: CellType) {
+        let (x1, y1) = pos1;
+        let (x2, y2) = pos2;
+
+        let dx = (x2 - x1).abs();
+        let dy = (y2 - y1).abs();
+        let sx = if x1 < x2 { 1 } else { -1 };
+        let sy = if y1 < y2 { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        let mut x = x1;
+        let mut y = y1;
+
+        while x != x2 || y != y2 {
+            self.set_pos((x, y), cell.clone());
+
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err -= dy;
+                x += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    fn next_state_cell(&self, pos: (isize, isize), cell: &Cell) -> Cell {
+        if pos.0 == 0
+            || pos.0 == self.width as isize - 1
+            || pos.1 == 0
+            || pos.1 == self.height as isize - 1
+        {
+            return Cell::new(CellType::EMPTY, None);
+        }
+
+        let neibs = vec![
+            self.cells[self.get_idx((pos.0 - 1, pos.1 - 1))],
+            self.cells[self.get_idx((pos.0, pos.1 - 1))],
+            self.cells[self.get_idx((pos.0 + 1, pos.1 - 1))],
+            self.cells[self.get_idx((pos.0 - 1, pos.1))],
+            self.cells[self.get_idx((pos.0 + 1, pos.1))],
+            self.cells[self.get_idx((pos.0 - 1, pos.1 + 1))],
+            self.cells[self.get_idx((pos.0, pos.1 + 1))],
+            self.cells[self.get_idx((pos.0 + 1, pos.1 + 1))],
+        ];
+
+        cell.next_state(neibs)
+    }
+
+    /// Updates the cells vec to the next logical state
+    pub fn next_state(&mut self) {
+        let mut cells_next: Vec<Cell> = Vec::with_capacity(self.cells.len());
+
+        self.cells
+            .clone()
+            .par_iter()
+            .enumerate()
+            .map(|(index, cell)| self.next_state_cell(self.get_pos(index as isize), cell))
+            .collect_into_vec(&mut cells_next);
+
+        // self.cells = cells_next;
+        std::mem::swap(&mut self.cells, &mut cells_next);
+    }
+
+    pub fn get_color_vec(&mut self) -> Vec<[u8; 4]> {
+        self.cells.iter().map(|cell| cell.get_color()).collect()
+    }
+}
+
+../crates/pixpox_utils/src/CA/cell_realm.rs end
+../crates/pixpox_utils/src/CA/rules.rs begin
+pub struct Rules {
+
+}
+
+impl Rules {
+
+}
+../crates/pixpox_utils/src/CA/rules.rs end
+../crates/pixpox_utils/src/CA/mod.rs begin
+pub mod conway;
+pub mod cell_realm;
+../crates/pixpox_utils/src/CA/mod.rs end
+../crates/pixpox_utils/src/CA/conway.rs begin
+use log::{debug, error};
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
+use std::collections::HashMap;
+
+#[derive(Clone)]
+pub struct ConwayGrid {
+    height: u32,      // real height
+    width: u32,       // real width
+    cells: Vec<bool>, // real cells
+}
+
+impl ConwayGrid {
+    pub fn new(height: u32, width: u32, gen_chance: f64) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut cells: Vec<bool> = Vec::new();
+
+        for _ in 0..height {
+            for _ in 0..width {
+                let alive = rng.gen_bool(gen_chance);
+                cells.push(alive);
+            }
+        }
+
+        Self {
+            cells,
+            width: width,
+            height: height,
+        }
+    }
+
+    /// Private function to map between real pos and idx
+    fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.width as isize + pos.0;
+        idx as usize
+    }
+
+    // Private function to map idx to real pos
+    fn get_pos(&self, idx: isize) -> (isize, isize) {
+        let x = idx % self.width as isize;
+        let y = idx / self.width as isize;
+
+        (x, y)
+    }
+
+    pub fn clear_grid(&mut self) {
+        self.cells = self.cells.iter().map(|_| false).collect();
+    }
+
+    pub fn set_cell(&mut self, pos: (isize, isize), state: bool) {
+        let idx = self.get_idx(pos);
+        self.cells[idx] = state;
+    }
+
+    pub fn count_neibs(&self, pos: (isize, isize)) -> usize {
+        if pos.0 == 0
+            || pos.0 == self.width as isize - 1
+            || pos.1 == 0
+            || pos.1 == self.height as isize - 1
+        {
+            return 0;
+        }
+
+        self.cells[self.get_idx((pos.0 - 1, pos.1 - 1))] as usize
+            + self.cells[self.get_idx((pos.0 - 1, pos.1))] as usize
+            + self.cells[self.get_idx((pos.0 - 1, pos.1 + 1))] as usize
+            + self.cells[self.get_idx((pos.0, pos.1 - 1))] as usize
+            + self.cells[self.get_idx((pos.0, pos.1 + 1))] as usize
+            + self.cells[self.get_idx((pos.0 + 1, pos.1 - 1))] as usize
+            + self.cells[self.get_idx((pos.0 + 1, pos.1))] as usize
+            + self.cells[self.get_idx((pos.0 + 1, pos.1 + 1))] as usize
+    }
+
+    /// Set pos
+    pub fn set_pos(&mut self, pos: (isize, isize), cell: bool) {
+        let idx = self.get_idx(pos);
+        self.cells[idx] = cell;
+    }
+
+    /// Implement Bresenham's line algorithm
+    pub fn set_line(&mut self, pos1: (isize, isize), pos2: (isize, isize), cell: bool) {
+        let (x1, y1) = pos1;
+        let (x2, y2) = pos2;
+
+        let dx = (x2 - x1).abs();
+        let dy = (y2 - y1).abs();
+        let sx = if x1 < x2 { 1 } else { -1 };
+        let sy = if y1 < y2 { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        let mut x = x1;
+        let mut y = y1;
+
+        while x != x2 || y != y2 {
+            self.set_pos((x, y), cell.clone());
+
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err -= dy;
+                x += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// Updates the cells vec to the next logical state
+    pub fn next_state(&mut self) {
+        let mut cells_next: Vec<bool> = Vec::with_capacity(self.cells.len());
+
+        self.cells
+            .par_iter()
+            .enumerate()
+            .map(|(index, state)| {
+                let pos = self.get_pos(index as isize);
+                let neibs = self.count_neibs(pos);
+
+                let new_state = if *state {
+                    neibs == 2 || neibs == 3
+                } else {
+                    neibs == 3
+                };
+
+                new_state
+            })
+            .collect_into_vec(&mut cells_next);
+
+        // self.cells = cells_next;
+        std::mem::swap(&mut self.cells, &mut cells_next);
+    }
+
+    pub fn get_color_vec(&mut self) -> Vec<[u8; 4]> {
+        self.cells
+            .iter()
+            .map(|state| {
+                if *state {
+                    [0, 0, 250, 255]
+                } else {
+                    [0, 0, 0, 255]
+                }
+            })
+            .collect()
+    }
+}
+
+../crates/pixpox_utils/src/CA/conway.rs end
+../crates/pixpox_ecs/Cargo.toml begin
+[package]
+name = "pixpox_ecs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winit = "0.27"
+queues = "1.0.2"
+bit-set = "0.5.3"
+bit-vec = "0.6.3"
+env_logger = "0.9"
+log = "0.4"
+ticktock = "0.8.0"
+string-interner = "0.14.0"
+rayon = "1.6.1"
+winit_input_helper = "0.13.0"
+
+# Local Crates
+pixpox_utils = { path = "../pixpox_utils" }
+arc-interner = "0.7.0"
+lasso = { version = "0.6.0", features = ["multi-threaded"] }
+
+../crates/pixpox_ecs/Cargo.toml end
+../crates/pixpox_ecs/src/world.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+use core::panic;
+use std::{
+    any::{self, Any},
+    borrow::BorrowMut,
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
+    },
+    thread,
+    time::{self, Duration, Instant},
+};
+
+use log::{debug, error, info};
+use pixpox_utils::stats::Stats;
+use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use winit::event::{VirtualKeyCode, Event};
+use winit_input_helper::WinitInputHelper;
+
+use crate::{
+    component::{self},
+    entity::{Entity, EntityManager},
+    Label, Run, Storage, Texture, Update,
+};
+
+use ticktock::{Clock, Timer};
+
+static MAX_WORLD_ID: AtomicUsize = AtomicUsize::new(0);
+
+struct WorldId(usize);
+
+impl WorldId {
+    pub fn new() -> Option<Self> {
+        MAX_WORLD_ID
+            // We use `Relaxed` here since this atomic only needs to be consistent with itself
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                val.checked_add(1)
+            })
+            .map(WorldId)
+            .ok()
+    }
+}
+
+fn print_type_of<T>(_: &T) {
+    println!("{}", std::any::type_name::<T>())
+}
+
+pub enum BucketAction {
+    GET,
+    PUT,
+}
+
+pub struct InputHandler {
+    pub winit: WinitInputHelper,
+    pub mouse: (isize, isize),
+    pub mouse_prev: (isize, isize),
+    pub scale: f32,
+}
+
+impl InputHandler {
+    pub fn new() -> Self {
+        Self {
+            winit: WinitInputHelper::new(),
+            mouse: (0, 0),
+            mouse_prev: (0, 0),
+            scale: 1.0
+        }
+    }
+
+    pub fn update(&mut self, event: &Event<()>, mouse_pos: (isize, isize), prev_mouse_pos: (isize, isize)) {
+        self.winit.update(event);
+        self.mouse = mouse_pos;
+        self.mouse_prev = prev_mouse_pos;
+    }
+
+    pub fn update_scale (&mut self, scale: f32) {
+        self.scale = scale;
+    }
+
+    // Calculate mousepos based on scale
+    pub fn get_mouse_pos(&self) -> (isize, isize) {
+        (self.mouse.0 / self.scale as isize, self.mouse.1 / self.scale as isize)
+    }
+}
+
+// TODO: Add a field for tick speed
+pub struct World {
+    id: WorldId,
+    pub entities: EntityManager,
+    pub component_vecs: Vec<Box<dyn ComponentVec + Send>>,
+    pub storage: RwLock<Storage>,
+    pub last_update: time::Instant,
+    pub stats: Stats,
+    pub input: InputHandler,
+    paused: bool,
+}
+
+impl World {
+    pub fn new() -> Self {
+        let entities = EntityManager::new();
+        let component_vecs = Vec::new();
+
+        // show some fps measurements every 5 seconds
+        let fps = Timer::apply(|delta_t, prev_tick| (delta_t, *prev_tick), 0)
+            .every(time::Duration::from_secs(5))
+            .start(time::Instant::now());
+
+        print_type_of(&fps);
+
+        Self {
+            id: WorldId::new()
+                .expect("More PixPox worlds have been created than currently supported."),
+            entities,
+            component_vecs,
+            last_update: time::Instant::now(),
+            storage: RwLock::new(Storage::new()),
+            stats: Stats::new(),
+            input: InputHandler::new(),
+            paused: false,
+        }
+    }
+
+    pub fn spawn(&mut self) -> Entity {
+        self.new_entity()
+    }
+
+    pub fn add_component_to_entity<
+        ComponentType: 'static + Label + Run + Update + Clone + Send + Sync,
+    >(
+        &mut self,
+        entity: Entity,
+        mut component: ComponentType,
+    ) {
+        let now = Instant::now();
+        // TODO: use a hashmap for this shit
+        // Search for any existing ComponentVecs that match the type of the component being added.
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec
+                .as_any_mut()
+                .downcast_mut::<Vec<Option<ComponentType>>>()
+            {
+                component_vec[entity.id as usize] = Some(component);
+
+                debug!(
+                    "World::add_component_to_entity() existing component_vec: {} micros",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                return;
+            }
+        }
+
+        // No matching component storage exists yet, so we have to make one.
+        let mut new_component_vec: Vec<Option<ComponentType>> =
+            Vec::with_capacity(self.entities.living_entity_count);
+
+        // All existing entities don't have this component, so we give them `None`
+        for _ in 0..self.entities.living_entity_count {
+            new_component_vec.push(None);
+        }
+
+        let label = component.label();
+        // Give this Entity the Component.
+        new_component_vec[entity.id as usize] = Some(component);
+        self.component_vecs.push(Box::new(new_component_vec));
+
+        debug!(
+            "World::add_component_to_entity() - Added component: {} to entity: {} in {} micros",
+            label,
+            entity.id,
+            now.elapsed().as_micros().to_string()
+        );
+    }
+
+    pub fn query_components<T: 'static>(&mut self, entities: Vec<&Entity>) -> Option<Vec<&T>> {
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec.as_any_mut().downcast_mut::<Vec<Option<T>>>()
+            {
+                debug!(
+                    "World::query_components() in {}",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                let res = entities
+                    .iter()
+                    .filter_map(|entity| {
+                        component_vec
+                            .get(entity.id)
+                            .expect("Entity could not be found in vec")
+                            .as_ref()
+                    })
+                    .collect::<Vec<&T>>();
+
+                return Some(res);
+            }
+        }
+
+        return None;
+    }
+
+    pub fn query_components_for_render<T: 'static + Texture>(&mut self) -> Option<Vec<&T>> {
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec.as_any_mut().downcast_mut::<Vec<Option<T>>>()
+            {
+                debug!(
+                    "World::query_entities_for_render() in {}",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                let res = component_vec
+                    .iter_mut()
+                    .filter_map(|x| x.as_ref())
+                    .collect::<Vec<&T>>();
+
+                return Some(res);
+            }
+        }
+
+        return None;
+    }
+    pub fn toggle_paused(&mut self) {
+        self.paused = !self.paused;
+    }
+
+    pub fn handle_input(&mut self) {
+        /*
+        if self.input.key_pressed(VirtualKeyCode::P) {
+            info!("Toggled world");
+            self.toggle_paused();
+        }
+         */
+    }
+
+    pub fn run<T: 'static + Texture>(&mut self) {
+        self.stats.new_tick();
+
+        if self.paused {
+            return;
+        }
+
+        self.handle_input();
+
+        let now = Instant::now();
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.run_all(&mut self.storage);
+        }
+        let elapsed = Instant::now() - now;
+        self.stats.update_sector("run()", elapsed.as_secs_f32());
+
+        let now = Instant::now();
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.update_all(&mut self.storage, &mut self.input);
+        }
+        let mut storage = self.storage.write().expect("Could not lock storage");
+        storage.update_global_pixel_map::<T>(&self.input);
+
+    
+        let elapsed = Instant::now() - now;
+        self.stats.update_sector("update()", elapsed.as_secs_f32());
+    }
+
+    fn new_entity(&mut self) -> Entity {
+        let entity = self.entities.create();
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.push_none();
+        }
+
+        debug!(
+            "World::new_entity(): {} micros",
+            now.elapsed().as_micros().to_string()
+        );
+
+        return entity;
+    }
+
+    fn spawn_random_terrain() {}
+
+    fn serialize() {}
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait ComponentVec: Send + Sync {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync);
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
+    fn push_none(&mut self);
+    fn run_all(&mut self, storage: &RwLock<Storage>);
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler);
+}
+
+impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self as &(dyn std::any::Any + Send + Sync)
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync) {
+        self as &mut (dyn std::any::Any + Send + Sync)
+    }
+
+    fn push_none(&mut self) {
+        self.push(None)
+    }
+
+    fn run_all(&mut self, storage: &RwLock<Storage>) {
+        self.par_iter_mut().for_each(|component| {
+            if let Some(c) = component {
+                c.run(&storage.read().unwrap());
+            }
+        })
+    }
+
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler) {
+        self.par_iter_mut().for_each(|component| {
+            if let Some(c) = component {
+                c.update(&storage, input);
+            }
+        })
+    }
+}
+../crates/pixpox_ecs/src/world.rs end
+../crates/pixpox_ecs/src/archetypes.rs begin
+
+../crates/pixpox_ecs/src/archetypes.rs end
+../crates/pixpox_ecs/src/lib.rs begin
+pub mod entity;
+
+pub mod world;
+pub mod component;
+pub mod storage;
+
+pub use world::*;
+pub use component::*;
+pub use storage::*;
+
+../crates/pixpox_ecs/src/lib.rs end
+../crates/pixpox_ecs/src/component.rs begin
+use std::sync::RwLock;
+
+use crate::{Storage, InputHandler};
+
+/// The Label trait is used to give a human-readable label to an ECS component.
+/// Every component must implement this trait in order to be used with the PixPox game engine.
+/// 
+/// ### Example
+///
+/// ```
+/// struct Cell {
+///     label: &'static str,
+/// }
+///
+/// impl Label for Cell {
+///    fn label(&mut self) -> &'static str {
+///       return self.label;
+///     }
+/// }
+/// ```
+pub trait Label {
+    fn label(&mut self) -> &'static str;
+}
+
+
+/// The `Run` trait specifies a `run()` method that is executed for each component 
+/// whenever `world.run()` is called. This function is parallelized using multi-threading 
+/// and only has read access to the storage. It is designed for heavy computation, and no 
+/// updates are allowed.
+/// 
+/// ### Example
+///
+/// ```
+/// struct Cell {
+///     label: &'static str,
+/// }
+///
+/// impl Run for Cell {
+///     fn run(&mut self, storage: &Storage) {
+///         let grid = storage
+///             .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
+///             .expect("Could not query storage: grid");
+///     }
+/// }
+///
+/// ```
+pub trait Run {
+    fn run(&mut self, storage: &Storage);
+}
+
+/// The `Update` trait specifies an `update()` method, which much like `run()`  is 
+/// executed on every pass of `world.run()`. It is also parallelized, but its given a 
+/// `RwLock` instead of an immutable reference. This method is meant to update the 
+/// world when a change is present, and it should not attempt to obtain a `.write()` lock 
+/// on the storage when no changes are present, as doing so would adversely impact performance.
+/// 
+/// ### Example
+///
+/// ```
+/// struct Cell {
+///     label: &'static str,
+/// }
+///
+/// impl Update for Cell {
+///     fn update(&mut self, storage: &RwLock<Storage>) {
+///         let mut storage = storage.write().unwrap();
+///     }
+/// }
+/// ```
+pub trait Update {
+    fn update(&mut self, storage: &RwLock<Storage>, input: &InputHandler);
+}
+
+/// The Texture trait defines how a component should be rendered.
+/// The `render()` method is responsible for rendering the texture, given a `pixels` buffer as an argument, 
+/// and the `size()` method returns the size of the texture.
+///
+/// ### Example
+/// ```
+/// impl Texture for GlobalPixelMap {
+///     fn render(&self, pixels: &mut [u8]) {
+///         debug!("Rendering GlobalPixelMap");
+///         for (c, pix) in self.pixelmap
+///             .iter()
+///             .zip(pixels.chunks_exact_mut(4)) {
+///                 pix.copy_from_slice(c);
+///         }
+///     }
+///
+///     fn size(&self) -> (u32, u32) {
+///         return (self.width, self.height);
+///     }
+/// }
+/// ```
+pub trait Texture {
+    fn render(&self, pixels: &mut [u8]);
+    fn update(&mut self, input: &InputHandler);
+    fn size(&self) -> (u32, u32);
+}
+
+../crates/pixpox_ecs/src/component.rs end
+../crates/pixpox_ecs/src/entity.rs begin
+use std::time::Instant;
+
+// max entities should be the size of the largest possible u32 value
+// const MAX_ENTITIES: usize = std::usize::MAX;
+
+use log::{debug, error, info, warn};
+
+#[derive(Debug, Clone, Copy)]
+pub struct Entity {
+    pub id: usize,
+}
+
+pub struct EntityManager {
+    pub id_counter: usize,
+    pub living_entity_count: usize, // number of living entities
+}
+
+impl EntityManager {
+    pub fn new() -> Self {
+
+        Self {
+            id_counter: 0,
+            living_entity_count: 0,
+        }
+    }
+
+    pub fn create(&mut self) -> Entity {
+        let now = Instant::now();
+
+        let id = self.id_counter;
+        self.id_counter += 1;
+        self.living_entity_count += 1;
+
+        debug!(
+            "EntityManager::create() - id: {}, living_entity_count: {}, in {} micros",
+            id, self.living_entity_count,
+            now.elapsed().as_micros().to_string()
+        );
+
+        Entity { id }
+    }
+
+    pub fn destroy(&mut self, entity: Entity) {
+        self.living_entity_count -= 1;
+
+        debug!(
+            "EntityManager::destroy() - id: {}, living_entity_count: {}",
+            entity.id, self.living_entity_count
+        );
+    }
+}
+
+../crates/pixpox_ecs/src/entity.rs end
+../crates/pixpox_ecs/src/storage.rs begin
+use lasso::{Spur, ThreadedRodeo};
+
+use std::{
+    any::Any,
+    collections::{HashMap},
+};
+
+use crate::{Texture, InputHandler};
+
+pub enum BucketAction {
+    GET,
+    PUT,
+}
+
+/// # Storage
+///
+/// Storage is a data structure designed to store global data accessible to all components.
+///
+/// It introduces a query system to create and retrieve buckets through a simple-to-use API.
+///
+/// To optimize bucket lookup, Storage implements a multi-threaded interner that efficiently stores bucket
+/// labels and associates them with Spurs. This interner facilitates fast and efficient hashmap lookup.
+///
+/// ## Example
+///
+/// ```
+/// let mut storage = app.world.storage.write().unwrap();
+///
+/// let (width, height) = (cfg.window_width, cfg.window_height);
+/// storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
+///
+/// let (width, height) = storage
+///     .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid-size")
+///     .expect("Could not query storage: grid-size");
+
+/// let mut (width, height) = storage
+///     .query_storage_mut::<HashMap<LogicalPosition<u32>, bool>>("grid-size")
+///     .expect("Could not query storage: grid-size");
+///
+/// ```
+///
+/// ## Panics
+///
+/// - If the bucket associated with the given label is not found, `query_storage()` and `query_storage_mut()`
+/// will panic with an error message.
+///
+/// - If the multi-threaded interner fails to recognize a string, `query_storage()` and `query_storage_mut()`
+/// will panic with an error message.
+///
+/// ## Safety
+///
+/// - The data stored in the `Storage` is not guaranteed to be thread-safe by default.
+/// If you need thread-safety, you can use a `RwLock` or a `Mutex` to synchronize access to the `Storage`.
+
+pub struct Storage {
+    pub buckets: HashMap<Spur, Box<dyn Any + Send + Sync>>,
+    interner: ThreadedRodeo,
+}
+
+impl Storage {
+    pub fn new() -> Self {
+        Self {
+            buckets: HashMap::new(),
+            interner: ThreadedRodeo::new(),
+        }
+    }
+
+    pub fn query_storage<T: 'static>(&self, label: &'static str) -> Option<&T> {
+        let key = &self
+            .interner
+            .get(label)
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::query_storage() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_ref::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn query_storage_mut<T: 'static>(&mut self, label: &'static str) -> Option<&mut T> {
+        let key = &self
+            .interner
+            .get(label)
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::query_storage_mut() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn query_global_pixel_map<T: 'static + Texture>(
+        &mut self,
+    ) -> Option<&mut T> {
+        let key = &self
+            .interner
+            .get("pixelmap")
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::query_global_pixel_map() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn update_global_pixel_map<T: 'static + Texture>(
+        &mut self, input: &InputHandler
+    ) {
+        let key = &self
+            .interner
+            .get("pixelmap")
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::update_global_pixel_map() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                downcasted.update(&input);
+            }
+        }
+    }
+
+    pub fn new_global_pixel_map<T: 'static + Texture + Send + Sync>(&mut self, pixelmap: T) {
+        let key = self.interner.get_or_intern("pixelmap");
+
+        self.buckets.insert(key, Box::new(pixelmap));
+    }
+
+    pub fn new_bucket<T: 'static + Send + Sync>(&mut self, label: &'static str, data: T) {
+        let key = self.interner.get_or_intern(label);
+
+        self.buckets.insert(key, Box::new(data));
+    }
+
+    pub fn new_hashmap_bucket<K: 'static + Send + Sync, V: 'static + Send + Sync>(
+        &mut self,
+        label: &'static str,
+        default: Option<HashMap<K, V>>,
+    ) {
+        let key = self.interner.get_or_intern(label);
+        let datastorage = Box::new(HashMap::<K, V>::new());
+
+        match default {
+            Some(map) => {
+                self.buckets.insert(key, Box::new(map));
+            },
+            None => {
+                self.buckets.insert(key, datastorage);
+            },
+        }
+    }
+}
+
+../crates/pixpox_ecs/src/storage.rs end
+../crates/pixpox_ecs/src/command.rs begin
+
+../crates/pixpox_ecs/src/command.rs end
+../examples/conway/AppConfig.toml begin
+window_title = "Conway"
+window_height = 250
+window_width = 500
+window_scale = 2.0
+window_fullscreen = false
+
+
+../examples/conway/AppConfig.toml end
+../examples/conway/main.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+pub mod custom_components;
+pub mod global_pixel_map;
+
+extern crate dotenv;
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
+use std::{collections::HashMap, time::Instant};
+
+use dotenv::dotenv;
+
+use imgui::Ui;
+use log::{debug, error, info};
+use pixpox::pixpox_app::App;
+use pixpox::pixpox_utils;
+use pixpox_app::Config;
+use pixpox_ecs::entity::Entity;
+use pixpox_ecs::{world, Texture};
+use pixpox_ecs::{Run, Update};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::{conway::ConwayGrid, Stats};
+use rand::Rng;
+use winit::dpi::{LogicalPosition, Position};
+use winit_input_helper::WinitInputHelper;
+
+use crate::global_pixel_map::GlobalPixelMap;
+use pixpox_renderer::{Camera, Direction};
+
+use crate::custom_components::ConwayGridComponent;
+
+const WINDOW_TITLE: &str = "pixpox!";
+
+fn main() {
+    dotenv().ok();
+    pollster::block_on(run());
+}
+
+fn show_metrics(ui: &mut Ui, _state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
+async fn run() {
+    let cfg: Config =
+        confy::load_path("./examples/conway/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+
+    let mut app = App::new(cfg.clone());
+
+    // Create a camera
+    let camera = Camera::new(
+        0,
+        0,
+        cfg.window_height,
+        cfg.window_width,
+        cfg.window_height,
+        cfg.window_width,
+    );
+
+    // Define global data structure
+    let global_pixel_map = GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
+
+    // Initialise world; fill global data structures
+    let entity = app.world.spawn();
+
+    let grid_component = ConwayGridComponent::new(1000, 1000, 0.50);
+
+    app.world.add_component_to_entity(entity, grid_component);
+
+    // Define UI Callbacks and States
+    let show_metrics_state = &mut true;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        // ui.show_metrics_window(state);
+        ui.window("Conway Performance (World)")
+            .position([60.0, 60.0], imgui::Condition::Once)
+            .size([200.0, 200.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                }
+            });
+    };
+
+    let show_about_state = &mut false;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui.register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui.register_child("Debug", &mut performance_metrics);
+
+    // write storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
+
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+    }
+
+    app.run::<GlobalPixelMap>().await;
+}
+
+../examples/conway/main.rs end
+../examples/conway/custom_components.rs begin
+use std::{collections::HashMap, sync::RwLock};
+
+use log::{debug, error};
+use pixpox_app::App;
+use pixpox_ecs::{
+    entity::{self, Entity},
+    InputHandler, Label, Run, Storage, Texture, Update, World,
+};
+use pixpox_utils::conway::ConwayGrid;
+use winit::{
+    dpi::{LogicalPosition, Position},
+    event::VirtualKeyCode,
+};
+use winit_input_helper::WinitInputHelper;
+
+use crate::global_pixel_map::GlobalPixelMap;
+
+#[derive(Clone)]
+pub struct ConwayGridComponent {
+    inner: ConwayGrid,
+    paused: bool,
+}
+
+impl ConwayGridComponent {
+    pub fn new(height: u32, width: u32, gen_chance: f64) -> Self {
+        Self {
+            inner: ConwayGrid::new(height, width, gen_chance),
+            paused: false,
+        }
+    }
+}
+
+impl Run for ConwayGridComponent {
+    fn run(&mut self, _storage: &pixpox_ecs::Storage) {
+        if self.paused {
+            return;
+        }
+
+        self.inner.next_state();
+    }
+}
+
+impl Update for ConwayGridComponent {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
+        let mut storage = storage.write().unwrap();
+
+        if input.winit.key_pressed(VirtualKeyCode::P) {
+            log::info!("Toggled world");
+            self.paused = !self.paused;
+        }
+
+        if input.winit.key_pressed(VirtualKeyCode::C) {
+            log::info!("Clear grid");
+            self.inner.clear_grid();
+        }
+
+        if input.winit.mouse_held(0) {
+            log::info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
+            self.inner.set_line(input.mouse, input.mouse_prev, true);
+        }
+
+        // Fetch PixelMap
+        let pixelmap = storage
+            .query_storage_mut::<GlobalPixelMap>("pixelmap")
+            .expect("Could not query Pixel Map");
+
+        pixelmap.draw_flat_vec(&mut self.inner.get_color_vec());
+    }
+}
+
+impl Label for ConwayGridComponent {
+    fn label(&mut self) -> &'static str {
+        "ConwayGrid"
+    }
+}
+
+../examples/conway/custom_components.rs end
+../examples/conway/global_pixel_map.rs begin
+use log::{debug, error};
+use pixpox_ecs::{InputHandler, Texture, Update};
+use winit::event::VirtualKeyCode;
+
+use pixpox_renderer::{Camera, Direction};
+
+#[derive(Debug)]
+pub struct GlobalPixelMap {
+    pixelmap: Vec<[u8; 4]>,
+    window_width: u32,
+    window_height: u32,
+    camera: Camera,
+}
+
+impl GlobalPixelMap {
+    /// Creates a new empty pixelmap with the given dimensions.
+    /// The pixelmap is initially filled with the given clear color.
+    ///
+    /// ### Arguments
+    ///
+    /// * `window_width` - The width of the pixelmap in pixels.
+    /// * `window_height` - The height of the pixelmap in pixels.
+    ///
+    /// ### Returns
+    ///
+    /// A new PixelMap instance.
+    ///
+    /// ### Example
+    ///
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// let pixelmap = PixelMap::new_empty(640, 480);
+    /// ```
+    pub fn new_empty(window_height: u32, window_width: u32, camera: Camera) -> Self {
+        // assert camera fits pixelmap dimensions
+        assert!(
+            camera.get_width() <= window_width && camera.get_height() <= window_height,
+            "Camera dimensions must be smaller than pixelmap dimensions"
+        );
+
+        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
+
+        for _y in 0..window_height {
+            for _x in 0..window_width {
+                let c: [u8; 4] = [0, 0, 0, 0];
+                pixelmap.push(c);
+            }
+        }
+
+        Self {
+            pixelmap,
+            window_width,
+            window_height,
+            camera,
+        }
+    }
+
+    /// Returns index of the position in the grid
+    /// * `pos`: (isize, isize) - (column, row) coordinates
+    pub fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.window_width as isize + pos.0;
+        idx as usize
+    }
+
+    /// Draws a pixel at the given position with the given color.
+    /// * `pos`: the position of the pixel to draw.
+    /// * `color`: the color to use when drawing the pixel.
+    pub fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
+        let idx = self.get_idx(pos);
+        self.pixelmap[idx as usize] = color;
+    }
+
+    /// Draws a flat vector of pixels to the screen.
+    /// * `vec`: the vector of pixels to draw.
+    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
+        std::mem::swap(&mut self.pixelmap, vec);
+    }
+
+    /// Extracts and scales the camera pixelmap to the window pixelmap.
+    /// * `camera`: the camera to use for extracting the visible region.
+    /// ### Example
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// # use camera::Camera;
+    /// let mut pixelmap = PixelMap::new_empty(640, 480);
+    /// let camera = Camera::new(0, 0, 320, 240);
+    /// pixelmap.extract_and_scale_visible_region(&camera);
+    /// ```
+    /// ### Returns
+    /// A vector of pixels representing the visible region of the camera.
+    /// The vector is scaled to the window dimensions.
+    pub fn extract_and_scale_visible_region(&self, camera: &Camera) -> Vec<[u8; 4]> {
+        debug!(
+            "extract_and_scale_visible_region() called with camera: {:?}",
+            camera
+        );
+
+        let sf_width = self.window_width as f32 / camera.get_width() as f32;
+        let sf_height = self.window_height as f32 / camera.get_height() as f32;
+        // let sf = sf_width.min(sf_height).ceil() as u32;
+        let sfw = sf_width.ceil() as u32;
+        let sfh = sf_height.ceil() as u32;
+
+        debug!(
+            "region: [window_width: {}, camera.width: {} | window.height: {}, camera.height: {}]",
+            self.window_width,
+            camera.get_width(),
+            self.window_height,
+            camera.get_height()
+        );
+ 
+        debug!("sfw: {}", sfw);
+        debug!("sfh: {}", sfh);
+
+        // scale camera_pixelmap to window_pixelmap
+        let mut window_pixelmap = vec![[0; 4]; (self.window_width * self.window_height) as usize];
+        for camera_y in camera.get_y()..(camera.get_y() + camera.get_height()) {
+            for camera_x in camera.get_x()..(camera.get_x() + camera.get_width()) {
+                // calculate real indexes
+                let (real_x, real_y) = (camera_x - camera.get_x(), camera_y - camera.get_y());
+
+                // calculate camera index
+                let camera_idx = self.get_idx((camera_x as isize, camera_y as isize));
+
+                // ensure camera index is in bounds
+                if camera_idx >= self.pixelmap.len() {
+                    continue;
+                }
+
+                // get camera pixel value to scale
+                let pixel_value = self.pixelmap[camera_idx as usize];
+
+                // scale camera pixel value to real window
+                for dy in 0..sfh {
+                    for dx in 0..sfw {
+                        let s_x = (real_x * sfw + dx).clamp(0, self.window_width as u32 - 1);
+                        let s_y = (real_y * sfh + dy).clamp(0, self.window_height as u32 - 1);
+                        let s_idx = s_y as usize * self.window_width as usize + s_x as usize;
+
+                        window_pixelmap[s_idx] = pixel_value;
+                    }
+                }
+            }
+        }
+
+        window_pixelmap
+    }
+}
+
+impl Texture for GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]) {
+        let pixelmap = self.extract_and_scale_visible_region(&self.camera);
+
+        debug!("pixelmap len: {}", pixelmap.len());
+
+        let pixel_chunks = pixels.chunks_exact_mut(4);
+
+        for (c, pix) in pixelmap.iter().zip(pixel_chunks) {
+            pix.copy_from_slice(c);
+        }
+    }
+
+    fn update(&mut self, input: &InputHandler) {
+        let scroll_delta = input.winit.scroll_diff();
+        // log::error!("update() mouse scroll delta: [{}]", scroll_delta);
+
+        // if scroll up, zoom in
+        if scroll_delta >= 1.0 {
+            self.camera.zoom(0.8);
+        }
+
+        // if scroll down, zoom out
+        if scroll_delta <= -1.0 {
+            self.camera.zoom(1.2);
+        }
+
+        // if key D is pressed, move camera right
+        if input.winit.key_held(VirtualKeyCode::D) {
+            self.camera.move_direction(Direction::Right);
+        }
+
+        // if key A is held, move camera left
+        if input.winit.key_held(VirtualKeyCode::A) {
+            self.camera.move_direction(Direction::Left);
+        }
+
+        // if key W is held, move camera up
+        if input.winit.key_held(VirtualKeyCode::W) {
+            self.camera.move_direction(Direction::Up);
+        }
+
+        // if key S is held, move camera down
+        if input.winit.key_held(VirtualKeyCode::S) {
+            self.camera.move_direction(Direction::Down);
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.window_width, self.window_height);
+    }
+}
+
+../examples/conway/global_pixel_map.rs end
+../examples/ecs/AppConfig.toml begin
+window_title = "ECS"
+window_height = 420
+window_width = 521
+window_scale = 3.0
+window_fullscreen = false
+
+../examples/ecs/AppConfig.toml end
+../examples/ecs/main.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+pub mod custom_components;
+
+extern crate dotenv;
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
+use std::{collections::HashMap, time::Instant};
+
+use custom_components::Cell;
+use dotenv::dotenv;
+
+use imgui::Ui;
+use log::{debug, error, info};
+use pixpox::pixpox_app::App;
+use pixpox::pixpox_utils;
+use pixpox_app::Config;
+use pixpox_ecs::entity::Entity;
+use pixpox_ecs::{Run, InputHandler};
+use pixpox_ecs::{world, Texture};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::{Stats, conway::ConwayGrid};
+use rand::Rng;
+use winit::dpi::{LogicalPosition, Position};
+
+const WINDOW_TITLE: &str = "pixpox!";
+
+fn main() {
+    dotenv().ok();
+    pollster::block_on(run());
+}
+
+fn show_metrics(ui: &mut Ui, state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
+async fn run() {
+    let cfg: Config =
+        confy::load_path("./examples/ecs/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+    let mut app = App::new(cfg.clone());
+
+    let now = Instant::now();
+    let mut entities_count = 0;
+    let mut rng = rand::thread_rng();
+
+    // Define global data structures
+    let global_pixel_map =
+        GlobalPixelMap::new_empty(cfg.window_width, cfg.window_height, [0, 0, 0, 0]);
+
+    let mut optim_grid: ConwayGrid = ConwayGrid::new(cfg.window_width, cfg.window_height, 0.10);
+
+    // Initialise world; fill global data structures
+    for y in 0..cfg.window_height {
+        for x in 0..cfg.window_width {
+            let entity = app.world.spawn();
+
+            let pos = (x as isize, y as isize);
+            let alive = rng.gen_bool(0.10);
+
+            let cell_component = Cell::new(entity.id, pos, alive);
+
+            app.world.add_component_to_entity(entity, cell_component);
+
+            optim_grid.set_cell(pos, alive);
+
+            entities_count += 1;
+        }
+    }
+
+    // Define UI Callbacks and States
+    let mut show_metrics_state = &mut false;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.show_metrics_window(state);
+        ui.window("ECS Performance (World)")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                ui.text("entities: ".to_owned() + &entities_count.to_string());
+
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                };
+            });
+    };
+
+    let mut show_about_state = &mut true;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui
+        .register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui
+        .register_child("Debug", &mut performance_metrics);
+
+    // write storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
+
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+
+        storage.new_bucket::<ConwayGrid>("optim_grid", optim_grid);
+
+        let (width, height) = (cfg.window_width, cfg.window_height);
+        storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
+    }
+
+    info!(
+        "Main::run() create {} entities in {} seconds",
+        entities_count,
+        now.elapsed().as_secs_f32().to_string()
+    );
+
+    app.run::<GlobalPixelMap>()
+        .await;
+}
+
+#[derive(Debug)]
+pub struct GlobalPixelMap {
+    pixelmap: Vec<[u8; 4]>,
+    width: u32,
+    height: u32,
+    clear_color: [u8; 4],
+}
+
+impl GlobalPixelMap {
+    pub fn new_empty(width: u32, height: u32, clear_color: [u8; 4]) -> Self {
+        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
+
+        for _y in 0..height {
+            for _x in 0..width {
+                let c: [u8; 4] = [0, 0, 0, 0];
+                pixelmap.push(c);
+            }
+        }
+
+        Self {
+            pixelmap,
+            width,
+            height,
+            clear_color,
+        }
+    }
+
+    pub fn draw_pos(&mut self, pos: (u32, u32), color: [u8; 4]) {
+        let idx = pos.1 * self.width + pos.0;
+        self.pixelmap[idx as usize] = color;
+    }
+
+    pub fn run(&self) {}
+}
+
+impl Texture for GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]) {
+        debug!("Rendering GlobalPixelMap");
+        for (c, pix) in self.pixelmap.iter().zip(pixels.chunks_exact_mut(4)) {
+            pix.copy_from_slice(c);
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.width, self.height);
+    }
+
+    fn update(&mut self, input: &InputHandler) {
+        debug!("Updating GlobalPixelMap");
+    }
+}
+
+../examples/ecs/main.rs end
+../examples/ecs/custom_components.rs begin
+use std::{collections::HashMap, sync::RwLock};
+
+use imgui::InputFloat2;
+use log::{debug, error};
+use pixpox_app::App;
+use pixpox_ecs::{
+    entity::{self, Entity},
+    Label, Run, Storage, Texture, Update, World, InputHandler,
+};
+use pixpox_utils::conway::ConwayGrid;
+use winit::dpi::{LogicalPosition, Position};
+use winit_input_helper::WinitInputHelper;
+
+use crate::GlobalPixelMap;
+
+// Cell
+#[derive(Copy, Clone)]
+pub struct Cell {
+    entity_id: usize,
+    label: &'static str,
+
+    pos: (isize, isize),
+    state: bool,
+    heat: u8,
+    color: [u8; 4],
+    change: bool
+}
+
+impl Cell {
+    pub fn new(entity_id: usize, pos: (isize, isize), state: bool) -> Self {
+        let color = if state {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 0, 255]
+        };
+
+        Self {
+            entity_id,
+            label: "Cell",
+            pos,
+            state,
+            heat: 0,
+            color,
+            change: false
+        }
+    }
+}
+
+impl Label for Cell {
+    fn label(&mut self) -> &'static str {
+        return self.label;
+    }
+}
+
+impl Run for Cell {
+    fn run(&mut self, storage: &Storage) {
+        let optim_grid = storage
+            .query_storage::<ConwayGrid>("optim_grid")
+            .expect("Could not query optim_grid");
+
+        let neibs = optim_grid.count_neibs(self.pos);
+        // error!("neibs: {}", neibs);
+
+        if self.state {
+            self.state = neibs == 2 || neibs == 3;
+        } else {
+            self.state = neibs == 3;
+        }
+
+        self.heat = if self.state == true {
+            255
+        } else if self.heat > 0 {
+            self.heat - 1
+        } else {
+            0
+        };
+
+        // Update cell color
+        let old_color = self.color;
+        self.color = if self.state == true {
+            [255, 0, 0, 255]
+        } else {
+            [self.heat, 0, 0, 50]
+        };
+
+        self.change = old_color != self.color;
+    }
+}
+
+impl Update for Cell {
+    fn update(&mut self, rw_storage: &RwLock<Storage>, input: &InputHandler) {
+        if self.change {
+            let mut storage = rw_storage.write().unwrap();
+
+            // Fetch & Update cell in grid
+            let grid = storage
+                .query_storage_mut::<ConwayGrid>("optim_grid")
+                .expect("Could not get optim_grid");
+
+            grid.set_cell(self.pos, self.state);
+
+            let pixelmap = storage
+                .query_storage_mut::<GlobalPixelMap>("pixelmap")
+                .expect("Could not query Pixel Map");
+
+            pixelmap.draw_pos((self.pos.0 as u32, self.pos.1 as u32), self.color);
+        }
+    }
+}
+
+../examples/ecs/custom_components.rs end
+../examples/physics-ca/AppConfig.toml begin
+window_title = "Physics CA (Cellular Automaton)"
+window_height = 100
+window_width = 150
+window_scale = 8.0
+window_fullscreen = false
+
+../examples/physics-ca/AppConfig.toml end
+../examples/physics-ca/main.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+pub mod custom_components;
+
+extern crate dotenv;
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
+use std::{collections::HashMap, time::Instant};
+
+use dotenv::dotenv;
+
+use imgui::Ui;
+use log::{debug, error, info};
+use pixpox::pixpox_app::App;
+use pixpox::pixpox_utils;
+use pixpox_app::Config;
+use pixpox_ecs::entity::Entity;
+use pixpox_ecs::{world, Texture, World, InputHandler};
+use pixpox_ecs::{Run, Update};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::CA::cell_realm::CellRealm;
+use pixpox_utils::{conway::ConwayGrid, Stats};
+use rand::Rng;
+use winit::dpi::{LogicalPosition, Position};
+use winit::event::{DeviceEvent, Event, MouseButton, VirtualKeyCode};
+use winit_input_helper::WinitInputHelper;
+
+use crate::custom_components::CellRealmComponent;
+
+const WINDOW_TITLE: &str = "pixpox!";
+
+fn main() {
+    dotenv().ok();
+    pollster::block_on(run());
+}
+
+fn show_metrics(ui: &mut Ui, state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
+async fn run() {
+    let cfg: Config =
+        confy::load_path("./examples/physics-ca/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+
+    let mut app = App::new(cfg.clone());
+
+    // Define global data structures
+    let global_pixel_map =
+        GlobalPixelMap::new_empty(cfg.window_width + 2, cfg.window_height + 2, [0, 0, 0, 0]);
+
+    // Initialise world; fill global data structures
+    let entity = app.world.spawn();
+
+    let grid_component = CellRealmComponent::new(cfg.window_height, cfg.window_width);
+
+    app.world.add_component_to_entity(entity, grid_component);
+
+    // Define GUI Callbacks and States
+    let show_metrics_state = &mut false;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.show_metrics_window(state);
+        ui.window("Sandbox Performance (World)")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                }
+            });
+    };
+
+    let show_ca_state = &mut false;
+    let mut show_ca_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.window("Tool Selection")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                ui.button("water").then(|| {
+                });
+            });
+    };
+
+    let show_about_state = &mut true;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui.register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui.register_child("Debug", &mut performance_metrics);
+
+    // Get write lock for storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
+
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+
+        storage.new_bucket::<usize>("selected-tool", 0);
+    }
+
+    app.run::<GlobalPixelMap>().await;
+}
+
+#[derive(Debug)]
+pub struct GlobalPixelMap {
+    pixelmap: Vec<[u8; 4]>,
+    width: u32,
+    height: u32,
+    clear_color: [u8; 4],
+}
+
+impl GlobalPixelMap {
+    pub fn new_empty(width: u32, height: u32, clear_color: [u8; 4]) -> Self {
+        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
+
+        for _y in 0..height {
+            for _x in 0..width {
+                let c: [u8; 4] = [0, 0, 0, 0];
+                pixelmap.push(c);
+            }
+        }
+
+        Self {
+            pixelmap,
+            width,
+            height,
+            clear_color,
+        }
+    }
+
+    pub fn draw_pos(&mut self, pos: (u32, u32), color: [u8; 4]) {
+        let idx = pos.1 * self.width + pos.0;
+        self.pixelmap[idx as usize] = color;
+    }
+
+    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
+        std::mem::swap(&mut self.pixelmap, vec);
+    }
+
+    pub fn run(&self) {}
+}
+
+impl Texture for GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]) {
+        debug!("Rendering GlobalPixelMap");
+        for (c, pix) in self.pixelmap.iter().zip(pixels.chunks_exact_mut(4)) {
+            pix.copy_from_slice(c);
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.width, self.height);
+    }
+
+    fn update(&mut self, input: &InputHandler) {
+        debug!("Updating GlobalPixelMap");
+    }
+}
+
+../examples/physics-ca/main.rs end
+../examples/physics-ca/custom_components.rs begin
+use std::{collections::HashMap, sync::RwLock};
+
+use log::{debug, error, info};
+use pixpox_app::App;
+use pixpox_ecs::{
+    entity::{self, Entity},
+    Label, Run, Storage, Texture, Update, World, InputHandler,
+};
+use pixpox_utils::{
+    conway::ConwayGrid,
+    CA::cell_realm::{CellRealm, CellType},
+};
+use winit::{
+    dpi::{LogicalPosition, Position},
+    event::VirtualKeyCode,
+};
+use winit_input_helper::WinitInputHelper;
+
+use crate::GlobalPixelMap;
+
+#[derive(Clone)]
+pub struct CellRealmComponent {
+    inner: CellRealm,
+    paused: bool,
+}
+
+impl CellRealmComponent {
+    pub fn new(height: u32, width: u32) -> Self {
+        Self {
+            inner: CellRealm::new(height, width),
+            paused: false,
+        }
+    }
+}
+
+impl Run for CellRealmComponent {
+    fn run(&mut self, _storage: &pixpox_ecs::Storage) {
+        if !self.paused {
+            self.inner.next_state();
+        }
+    }
+}
+
+impl Update for CellRealmComponent {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
+        let mut storage = storage.write().unwrap();
+
+        if input.winit.key_pressed(VirtualKeyCode::P) {
+            info!("Toggled world");
+            self.paused = !self.paused;
+        }
+
+        if input.winit.mouse_held(0) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
+            self.inner.set_line(input.mouse, input.mouse_prev, CellType::WATER)
+        }
+
+        if input.winit.mouse_held(1) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse_prev.1);
+
+            self.inner.set_line(input.mouse, input.mouse_prev, CellType::STONE);
+        }
+
+        // Fetch PixelMap
+        let pixelmap = storage
+            .query_storage_mut::<GlobalPixelMap>("pixelmap")
+            .expect("Could not query Pixel Map");
+
+        pixelmap.draw_flat_vec(&mut self.inner.get_color_vec());
+    }
+}
+
+impl Label for CellRealmComponent {
+    fn label(&mut self) -> &'static str {
+        "CellRealm"
+    }
+}
+
+../examples/physics-ca/custom_components.rs end
+../src/lib.rs begin
+pub use pixpox_renderer;
+pub use pixpox_utils;
+pub use pixpox_physics;
+pub use pixpox_app;
+pub use pixpox_ecs;
+../src/lib.rs end
