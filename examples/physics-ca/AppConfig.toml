@@ -1,5 +1,5 @@
 window_title = "Physics CA (Cellular Automaton)"
-window_height = 100
-window_width = 150
-window_scale = 8.0
+window_height = 500
+window_width = 1000
+window_scale = 1.0
 window_fullscreen = false

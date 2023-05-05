@@ -13,5 +13,3 @@ with open(output_file, 'w') as outfile:
                         outfile.write(f"{filepath} begin\n")
                         outfile.write(infile.read())
                         outfile.write(f"\n{filepath} end\n")
-
-

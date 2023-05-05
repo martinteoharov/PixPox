@@ -61,13 +61,13 @@ async fn run() {
 
     app.world.add_component_to_entity(entity, grid_component);
 
-    // Define GUI Callbacks and States
-    let show_metrics_state = &mut false;
+    // Define UI Callbacks and States
+    let show_metrics_state = &mut true;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
-        ui.show_metrics_window(state);
-        ui.window("Sandbox Performance (World)")
-            .position([60.0, 390.0], imgui::Condition::Once)
-            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+        // ui.show_metrics_window(state);
+        ui.window("Conway Performance (World)")
+            .position([60.0, 60.0], imgui::Condition::Once)
+            .size([200.0, 200.0], imgui::Condition::FirstUseEver)
             .collapsible(true)
             .build(|| {
                 for s in stats.get_formatted_stats().iter() {
@@ -76,19 +76,7 @@ async fn run() {
             });
     };
 
-    let show_ca_state = &mut false;
-    let mut show_ca_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
-        ui.window("Tool Selection")
-            .position([60.0, 390.0], imgui::Condition::Once)
-            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
-            .collapsible(true)
-            .build(|| {
-                ui.button("water").then(|| {
-                });
-            });
-    };
-
-    let show_about_state = &mut true;
+    let show_about_state = &mut false;
     let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
         ui.show_about_window(state);
     };
