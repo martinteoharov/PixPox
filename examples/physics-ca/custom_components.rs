@@ -8,7 +8,7 @@ use pixpox_ecs::{
 };
 use pixpox_utils::{
     conway::ConwayGrid,
-    CA::cell_realm::{CellRealm, Cell},
+    CA::cell_realm::{CellRealm, Cell}, cell_realm::CellType,
 };
 use winit::{
     dpi::{LogicalPosition, Position},
@@ -53,20 +53,20 @@ impl Update for CellRealmComponent {
         // Left mouse click
         if input.winit.mouse_held(0) {
             info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
-            self.inner.set_circle(input.mouse, 30, Cell::SAND)
+            self.inner.set_circle(input.mouse, 30, Cell::new(CellType::SAND));
         }
 
         // Right mouse click
         if input.winit.mouse_held(1) {
             info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
-            self.inner.set_circle(input.mouse, 30, Cell::WATER)
+            self.inner.set_circle(input.mouse, 30, Cell::new(CellType::WATER));
         }
 
         // Middle mouse click
         if input.winit.mouse_held(2) {
             info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse_prev.1);
 
-            self.inner.set_line(input.mouse, input.mouse_prev, Cell::SOLID);
+            self.inner.set_line(input.mouse, input.mouse_prev, Cell::new(CellType::SOLID));
         }
 
         // clear grid
