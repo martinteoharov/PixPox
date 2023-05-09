@@ -1538,6 +1538,7 @@ dependencies = [
  "env_logger",
  "lasso",
  "log",
+ "pixpox_renderer",
  "pixpox_utils",
  "queues",
  "rayon",

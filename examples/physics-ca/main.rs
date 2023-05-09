@@ -65,7 +65,7 @@ async fn run() {
     let show_metrics_state = &mut true;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
         // ui.show_metrics_window(state);
-        ui.window("Conway Performance (World)")
+        ui.window(cfg.window_title.clone())
             .position([60.0, 60.0], imgui::Condition::Once)
             .size([200.0, 200.0], imgui::Condition::FirstUseEver)
             .collapsible(true)

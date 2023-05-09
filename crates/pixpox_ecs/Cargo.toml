@@ -16,8 +16,9 @@ ticktock = "0.8.0"
 string-interner = "0.14.0"
 rayon = "1.6.1"
 winit_input_helper = "0.13.0"
+arc-interner = "0.7.0"
+lasso = { version = "0.6.0", features = ["multi-threaded"] }
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
-arc-interner = "0.7.0"
-lasso = { version = "0.6.0", features = ["multi-threaded"] }
+pixpox_renderer = { path = "../pixpox_renderer" }

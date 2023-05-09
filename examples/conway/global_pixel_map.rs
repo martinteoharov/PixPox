@@ -198,4 +198,8 @@ impl Texture for GlobalPixelMap {
     fn size(&self) -> (u32, u32) {
         return (self.window_width, self.window_height);
     }
+
+    fn get_camera(&self) -> Camera {
+        self.camera.clone()
+    }
 }

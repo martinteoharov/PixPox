@@ -2,14 +2,14 @@ use std::fmt::Debug;
 
 use serde_derive::{Deserialize, Serialize};
 
-use pixpox_renderer::{gui::Gui, Pixels, SurfaceTexture};
+use pixpox_renderer::{gui::Gui, Camera, Pixels, SurfaceTexture};
 use winit::{
-    dpi::{LogicalSize},
+    dpi::LogicalSize,
     event::{Event, VirtualKeyCode},
     event_loop::{ControlFlow, EventLoop},
     platform::run_return::EventLoopExtRunReturn,
     window::Window,
-    window::{WindowBuilder, Fullscreen},
+    window::{Fullscreen, WindowBuilder},
 };
 
 use pixpox_ecs::{component::Texture as RenderTexture, World};
@@ -33,6 +33,7 @@ pub struct App<'a> {
     event_loop: EventLoop<()>,
     window: Window,
     input: WinitInputHelper,
+    config: Config,
 }
 
 impl<'a> App<'a> {
@@ -54,7 +55,7 @@ impl<'a> App<'a> {
                 config.window_height as f32 * config.window_scale,
             );
             let mut window = WindowBuilder::new()
-                .with_title(config.window_title)
+                .with_title(config.window_title.clone())
                 .with_inner_size(scaled_size)
                 .with_min_inner_size(size);
 
@@ -62,8 +63,7 @@ impl<'a> App<'a> {
                 window = window.with_fullscreen(Some(Fullscreen::Borderless(None)));
             }
 
-            window.build(&event_loop)
-                .unwrap()
+            window.build(&event_loop).unwrap()
         };
 
         let pixels = {
@@ -89,12 +89,14 @@ impl<'a> App<'a> {
             input,
             event_loop,
             window,
+            config,
         }
     }
 
     pub async fn run<T: 'static + RenderTexture>(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
             // debug!("Event loop");
+            let mut camera: Camera;
 
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
@@ -111,6 +113,8 @@ impl<'a> App<'a> {
                 let pixelmap = storage
                     .query_global_pixel_map::<T>()
                     .expect("Could not query Pixel Map");
+
+                camera = pixelmap.get_camera();
 
                 // Render Global Pixelmap to frame
                 pixelmap.render(pixels);
@@ -151,6 +155,13 @@ impl<'a> App<'a> {
                     return;
                 }
 
+                let mut storage = self.world.storage.write().unwrap();
+
+                let pixelmap = storage
+                    .query_global_pixel_map::<T>()
+                    .expect("Could not query Pixel Map");
+
+                camera = pixelmap.get_camera();
 
                 // Handle mouse. This is a bit involved since support some simple
                 // line drawing (mostly because it makes nice looking patterns).
@@ -172,10 +183,21 @@ impl<'a> App<'a> {
                             .window_pos_to_pixel((prev_x, prev_y))
                             .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
 
-                        (
-                            (mx_i as isize, my_i as isize),
-                            (px_i as isize, py_i as isize),
-                        )
+                        let sf_width = self.config.window_width as f32 / camera.get_width() as f32;
+                        let sf_height =
+                            self.config.window_height as f32 / camera.get_height() as f32;
+
+                        let camera_mx_i =
+                            (mx_i as f32 / sf_width).floor() as isize + camera.get_x() as isize;
+                        let camera_my_i =
+                            (my_i as f32 / sf_height).floor() as isize + camera.get_y() as isize;
+
+                        let camera_px_i =
+                            (px_i as f32 / sf_width).floor() as isize + camera.get_x() as isize;
+                        let camera_py_i =
+                            (py_i as f32 / sf_height).floor() as isize + camera.get_y() as isize;
+
+                        ((camera_mx_i, camera_my_i), (camera_px_i, camera_py_i))
                     })
                     .unwrap_or_default();
 

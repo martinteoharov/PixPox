@@ -136,7 +136,6 @@ impl World {
         mut component: ComponentType,
     ) {
         let now = Instant::now();
-        // TODO: use a hashmap for this shit
         // Search for any existing ComponentVecs that match the type of the component being added.
         for component_vec in self.component_vecs.iter_mut() {
             if let Some(component_vec) = component_vec
@@ -226,6 +225,7 @@ impl World {
 
         return None;
     }
+
     pub fn toggle_paused(&mut self) {
         self.paused = !self.paused;
     }
