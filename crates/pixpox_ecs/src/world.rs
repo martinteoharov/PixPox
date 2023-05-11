@@ -91,7 +91,7 @@ impl InputHandler {
 pub struct World {
     id: WorldId,
     pub entities: EntityManager,
-    pub component_vecs: Vec<Box<dyn ComponentVec + Send>>,
+    pub component_vecs: Vec<Box<dyn ComponentVec>>,
     pub storage: RwLock<Storage>,
     pub last_update: time::Instant,
     pub stats: Stats,

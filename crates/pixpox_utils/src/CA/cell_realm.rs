@@ -215,7 +215,7 @@ impl CellRealm {
     pub fn next_state(&mut self) {
         let mut cells_next: Vec<Cell> = self.cells.clone();
         for y in (0..self.height as isize).rev() {
-            for x in (0..self.width as isize) {
+            for x in (0..self.width as isize).rev() {
                 let cell = self.cells[self.get_idx((x, y))];
                 let next_cell = self.next_state_cell(x, y, cell, &mut cells_next);
                 cells_next[self.get_idx((x, y))] = next_cell;

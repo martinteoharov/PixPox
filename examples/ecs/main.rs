@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod custom_components;
+pub mod global_pixel_map;
 
 extern crate dotenv;
 
@@ -23,9 +24,12 @@ use pixpox_ecs::entity::Entity;
 use pixpox_ecs::{Run, InputHandler};
 use pixpox_ecs::{world, Texture};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_renderer::Camera;
 use pixpox_utils::{Stats, conway::ConwayGrid};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
+
+use crate::global_pixel_map::GlobalPixelMap;
 
 const WINDOW_TITLE: &str = "pixpox!";
 
@@ -49,9 +53,19 @@ async fn run() {
     let mut entities_count = 0;
     let mut rng = rand::thread_rng();
 
+    // Create a camera
+    let camera = Camera::new(
+        0,
+        0,
+        cfg.window_height,
+        cfg.window_width,
+        cfg.window_height,
+        cfg.window_width,
+    );
+
     // Define global data structures
     let global_pixel_map =
-        GlobalPixelMap::new_empty(cfg.window_width, cfg.window_height, [0, 0, 0, 0]);
+        GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
 
     let mut optim_grid: ConwayGrid = ConwayGrid::new(cfg.window_width, cfg.window_height, 0.10);
 
@@ -131,56 +145,4 @@ async fn run() {
 
     app.run::<GlobalPixelMap>()
         .await;
-}
-
-#[derive(Debug)]
-pub struct GlobalPixelMap {
-    pixelmap: Vec<[u8; 4]>,
-    width: u32,
-    height: u32,
-    clear_color: [u8; 4],
-}
-
-impl GlobalPixelMap {
-    pub fn new_empty(width: u32, height: u32, clear_color: [u8; 4]) -> Self {
-        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
-
-        for _y in 0..height {
-            for _x in 0..width {
-                let c: [u8; 4] = [0, 0, 0, 0];
-                pixelmap.push(c);
-            }
-        }
-
-        Self {
-            pixelmap,
-            width,
-            height,
-            clear_color,
-        }
-    }
-
-    pub fn draw_pos(&mut self, pos: (u32, u32), color: [u8; 4]) {
-        let idx = pos.1 * self.width + pos.0;
-        self.pixelmap[idx as usize] = color;
-    }
-
-    pub fn run(&self) {}
-}
-
-impl Texture for GlobalPixelMap {
-    fn render(&self, pixels: &mut [u8]) {
-        debug!("Rendering GlobalPixelMap");
-        for (c, pix) in self.pixelmap.iter().zip(pixels.chunks_exact_mut(4)) {
-            pix.copy_from_slice(c);
-        }
-    }
-
-    fn size(&self) -> (u32, u32) {
-        return (self.width, self.height);
-    }
-
-    fn update(&mut self, input: &InputHandler) {
-        debug!("Updating GlobalPixelMap");
-    }
 }

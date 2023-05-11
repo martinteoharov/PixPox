@@ -11,7 +11,7 @@ use pixpox_utils::conway::ConwayGrid;
 use winit::dpi::{LogicalPosition, Position};
 use winit_input_helper::WinitInputHelper;
 
-use crate::GlobalPixelMap;
+use crate::global_pixel_map::GlobalPixelMap;
 
 // Cell
 #[derive(Copy, Clone)]
@@ -103,7 +103,7 @@ impl Update for Cell {
                 .query_storage_mut::<GlobalPixelMap>("pixelmap")
                 .expect("Could not query Pixel Map");
 
-            pixelmap.draw_pos((self.pos.0 as u32, self.pos.1 as u32), self.color);
+            pixelmap.draw_pos((self.pos.0, self.pos.1), self.color);
         }
     }
 }
