@@ -1,4 +1,3 @@
-use log::error;
 use rand::Rng;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -6,33 +5,20 @@ use rayon::prelude::{
 use std::collections::HashMap;
 
 #[derive(Copy, Clone, PartialEq)]
-pub enum CellType {
+pub enum Cell {
     EMPTY,
     SAND,
     WATER,
     SOLID,
 }
 
-#[derive(Copy, Clone)]
-pub struct Cell {
-    cell_type: CellType,
-    updated: bool,
-}
-
 impl Cell {
-    pub fn new(cell_type: CellType) -> Self {
-        Self {
-            cell_type,
-            updated: false,
-        }
-    }
-
     pub fn get_color(&self) -> [u8; 4] {
-        match self.cell_type {
-            CellType::EMPTY => [0, 0, 0, 0],
-            CellType::SAND => [255, 255, 0, 255],
-            CellType::WATER => [0, 0, 255, 255],
-            CellType::SOLID => [255, 255, 255, 255],
+        match self {
+            Cell::EMPTY => [0, 0, 0, 0],
+            Cell::SAND => [255, 255, 0, 255],
+            Cell::WATER => [0, 0, 255, 255],
+            Cell::SOLID => [255, 255, 255, 255],
         }
     }
 }
@@ -50,7 +36,7 @@ impl CellRealm {
 
         for _ in 0..height {
             for _ in 0..width {
-                cells.push(Cell::new(CellType::EMPTY));
+                cells.push(Cell::EMPTY);
             }
         }
 
@@ -128,16 +114,26 @@ impl CellRealm {
     }
 
     pub fn clear_grid(&mut self) {
-        self.cells = self
-            .cells
-            .iter()
-            .map(|_| Cell::new(CellType::EMPTY))
-            .collect();
+        self.cells = self.cells.iter().map(|_| Cell::EMPTY).collect();
     }
 
-    pub fn is_empty(&self, pos: (isize, isize)) -> bool {
-        let idx = self.get_idx(pos);
-        self.cells[idx].cell_type == CellType::EMPTY && !self.cells[idx].updated
+    fn update_next(
+        &self,
+        x: isize,
+        y: isize,
+        next_x: isize,
+        next_y: isize,
+        next_cell: Cell,
+        next_positions: &mut Vec<(isize, isize)>,
+        next_states: &mut Vec<Cell>,
+    ) {
+        let idx = self.get_idx((x, y));
+        next_positions[idx] = (next_x, next_y);
+        next_states[idx] = next_cell;
+    }
+
+    fn is_valid_pos(&self, x: isize, y: isize) -> bool {
+        x >= 0 && y >= 0 && x < self.width as isize && y < self.height as isize
     }
 
     fn next_state_cell(
@@ -145,89 +141,90 @@ impl CellRealm {
         x: isize,
         y: isize,
         cell: Cell,
-        cells_next: &mut Vec<Cell>,
-    ) -> Cell {
-
-        let mut updated_cell = cell;
-        updated_cell.updated = true;
-
-        match cell.cell_type {
-            CellType::SAND => {
-                if y < (self.height as isize - 1) && self.is_empty((x, y + 1)) {
-                    cells_next[self.get_idx((x, y + 1))] = Cell::new(CellType::SAND);
-                    return Cell::new(CellType::EMPTY);
-                } else if x > 0 && y < (self.height as isize - 1) && self.is_empty((x - 1, y + 1)) {
-                    cells_next[self.get_idx((x - 1, y + 1))] = Cell::new(CellType::SAND);
-                    return Cell::new(CellType::EMPTY);
-                } else if x < (self.width as isize - 1)
-                    && y < (self.height as isize - 1)
-                    && self.is_empty((x + 1, y + 1))
-                {
-                    cells_next[self.get_idx((x + 1, y + 1))] = Cell::new(CellType::SAND);
-                    return Cell::new(CellType::EMPTY);
-                } else {
-                    updated_cell
-                }
-            },
-            CellType::WATER => {
-                let mut rng = rand::thread_rng();
-                let is_empty_below = y < (self.height as isize - 1) && self.is_empty((x, y + 1));
-                let is_empty_left = x > 0 && self.is_empty((x - 1, y));
-                let is_empty_right = x < (self.width as isize - 1) && self.is_empty((x + 1, y));
-
-                // Check if water can go below
-                if is_empty_below {
-                    cells_next[self.get_idx((x, y + 1))] = Cell::new(CellType::WATER);
-                    updated_cell.cell_type = CellType::EMPTY;
-                    return updated_cell;
-                }
-
-                // Check if water can go left or right without overriding sand or water blocks
-                if is_empty_left && is_empty_right {
-                    let direction = rng.gen_range(0..2);
-                    if direction == 0 {
-                        cells_next[self.get_idx((x - 1, y))] = Cell::new(CellType::WATER);
-                        updated_cell.cell_type = CellType::EMPTY;
-                        return updated_cell;
-                    } else {
-                        cells_next[self.get_idx((x + 1, y))] = Cell::new(CellType::WATER);
-                        updated_cell.cell_type = CellType::EMPTY;
-                        return updated_cell;
+        next_positions: &mut Vec<(isize, isize)>,
+        next_states: &mut Vec<Cell>,
+    ) {
+        match cell {
+            Cell::SAND => {
+                let dirs = [(0, 1), (-1, 1), (1, 1)]; //down, left-down, right-down
+                for (dx, dy) in dirs.iter() {
+                    let next_x = x + dx;
+                    let next_y = y + dy;
+                    if self.is_valid_pos(next_x, next_y)
+                        && (self.cells[self.get_idx((next_x, next_y))] == Cell::EMPTY
+                            || self.cells[self.get_idx((next_x, next_y))] == Cell::WATER)
+                    {
+                        if self.cells[self.get_idx((next_x, next_y))] == Cell::WATER {
+                            self.update_next(x, y, x, y, Cell::WATER, next_positions, next_states);
+                        }
+                        self.update_next(
+                            x,
+                            y,
+                            next_x,
+                            next_y,
+                            Cell::SAND,
+                            next_positions,
+                            next_states,
+                        );
+                        return;
                     }
-                } else if is_empty_left {
-                    cells_next[self.get_idx((x - 1, y))] = Cell::new(CellType::WATER);
-                    updated_cell.cell_type = CellType::EMPTY;
-                    return updated_cell;
-                } else if is_empty_right {
-                    cells_next[self.get_idx((x + 1, y))] = Cell::new(CellType::WATER);
-                    updated_cell.cell_type = CellType::EMPTY;
-                    return updated_cell;
                 }
-                
-                updated_cell.cell_type = CellType::WATER;
-                return updated_cell;
+                // If no suitable spot was found, remain in the same position
+                self.update_next(x, y, x, y, Cell::SAND, next_positions, next_states);
             },
-            _ => updated_cell,
+
+            Cell::WATER => {
+                let dirs = [(0, 1), (-1, 1), (1, 1), (-1, 0), (1, 0)]; //down, left-down, right-down, left, right
+                for (dx, dy) in dirs.iter() {
+                    let next_x = x + dx;
+                    let next_y = y + dy;
+                    if self.is_valid_pos(next_x, next_y)
+                        && self.cells[self.get_idx((next_x, next_y))] == Cell::EMPTY
+                    {
+                        self.update_next(
+                            x,
+                            y,
+                            next_x,
+                            next_y,
+                            Cell::WATER,
+                            next_positions,
+                            next_states,
+                        );
+                        return;
+                    }
+                }
+                // If no suitable spot was found, remain in the same position
+                self.update_next(x, y, x, y, Cell::WATER, next_positions, next_states);
+            },
+            _ => {
+                // For any other cell type, it stays in the same position and state
+                self.update_next(x, y, x, y, cell, next_positions, next_states);
+            },
         }
     }
 
     /// Updates the cells vec to the next logical state
     pub fn next_state(&mut self) {
-        let mut cells_next: Vec<Cell> = self.cells.clone();
+        let mut cells_next: Vec<Cell> = vec![Cell::EMPTY; self.cells.len()];
+        let mut next_positions: Vec<(isize, isize)> = vec![(0, 0); self.cells.len()];
+        let mut next_states: Vec<Cell> = self.cells.clone();
+
         for y in (0..self.height as isize).rev() {
             for x in (0..self.width as isize).rev() {
                 let cell = self.cells[self.get_idx((x, y))];
-                let next_cell = self.next_state_cell(x, y, cell, &mut cells_next);
-                cells_next[self.get_idx((x, y))] = next_cell;
+                self.next_state_cell(x, y, cell, &mut next_positions, &mut next_states);
             }
         }
 
-        std::mem::swap(&mut self.cells, &mut cells_next);
-
-        // Reset updated flag
-        for cell in self.cells.iter_mut() {
-            cell.updated = false;
+        for idx in 0..self.cells.len() {
+            let next_pos = next_positions[idx];
+            let next_idx = self.get_idx(next_pos);
+            if cells_next[next_idx] == Cell::EMPTY {
+                cells_next[next_idx] = next_states[idx];
+            }
         }
+
+        self.cells = cells_next;
     }
 
     pub fn get_color_vec(&mut self) -> Vec<[u8; 4]> {
