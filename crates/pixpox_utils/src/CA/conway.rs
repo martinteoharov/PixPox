@@ -1,3 +1,4 @@
+use crate::letters;
 use log::{debug, error};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::{
@@ -23,6 +24,76 @@ impl ConwayGrid {
                 cells.push(alive);
             }
         }
+
+        Self {
+            cells,
+            width: width,
+            height: height,
+        }
+    }
+
+    pub fn new_pixpox(height: u32, width: u32, gen_chance: f64) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut cells: Vec<bool> = vec![false; (height * width) as usize];
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut alive = rng.gen_bool(gen_chance);
+
+                if x > 100 && x < 200 {
+                    if y > 70 && y < 140 {
+                        alive = false;
+                    }
+                }
+
+                let idx = (y * width) + x;
+                cells[idx as usize] = alive;
+            }
+        }
+
+        // Calculate the starting position for the first letter ('P') to center "PIXPOX"
+        let pixpox_width = 5 * 6 + 1 * 5; // Each letter is 5 cells wide, and there are 5 gaps between the letters
+        let pixpox_height = 5; // Each letter is 5 cells tall
+        let start_x = (width - pixpox_width) / 2;
+        let start_y = (height - pixpox_height) / 2;
+
+        // Draw "PIXPOX" in the middle
+        letters::draw_p(
+            &mut cells,
+            width as usize,
+            start_x as usize,
+            start_y as usize,
+        );
+        letters::draw_i(
+            &mut cells,
+            width as usize,
+            (start_x + 6) as usize,
+            start_y as usize,
+        );
+        letters::draw_x(
+            &mut cells,
+            width as usize,
+            (start_x + 12) as usize,
+            start_y as usize,
+        );
+        letters::draw_p(
+            &mut cells,
+            width as usize,
+            (start_x + 18) as usize,
+            start_y as usize,
+        );
+        letters::draw_o(
+            &mut cells,
+            width as usize,
+            (start_x + 24) as usize,
+            start_y as usize,
+        );
+        letters::draw_x(
+            &mut cells,
+            width as usize,
+            (start_x + 30) as usize,
+            start_y as usize,
+        );
 
         Self {
             cells,
@@ -138,7 +209,7 @@ impl ConwayGrid {
             .iter()
             .map(|state| {
                 if *state {
-                    [0, 0, 250, 255]
+                    [0, 0, 200, 255]
                 } else {
                     [0, 0, 0, 255]
                 }

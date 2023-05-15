@@ -4,6 +4,7 @@ pub use stats::Stats;
 pub mod CA;
 pub use CA::conway;
 pub use CA::cell_realm;
+pub use CA::letters;
 
 /// A macro similar to `vec![$elem; $size]` which returns a boxed array.
 ///

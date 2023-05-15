@@ -1,6 +1,6 @@
 window_title = "Conway"
-window_height = 500
-window_width = 1000
-window_scale = 2.0
+window_height = 200
+window_width = 300
+window_scale = 4.0
 window_fullscreen = false
 

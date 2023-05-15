@@ -68,7 +68,7 @@ async fn run() {
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
 
-    let grid_component = ConwayGridComponent::new(1000, 1000, 0.50);
+    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.10);
 
     app.world.add_component_to_entity(entity, grid_component);
 

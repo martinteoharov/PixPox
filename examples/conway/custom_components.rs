@@ -25,7 +25,7 @@ impl ConwayGridComponent {
     pub fn new(height: u32, width: u32, gen_chance: f64) -> Self {
         Self {
             inner: ConwayGrid::new(height, width, gen_chance),
-            paused: false,
+            paused: true,
         }
     }
 }
