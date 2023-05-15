@@ -5,28 +5,31 @@
 
 <img src="https://user-images.githubusercontent.com/43793073/234361085-053432ef-b9fe-4581-9795-4ddba162bf0c.png" alt="Image" width="400" height="200">
 
-PixPox is a 2D pixel game engine designed for game developers who want to create dynamic and engaging games. The engine incorporates advanced cellular automata capabilities, providing developers with a flexible and powerful toolset for creating natural-looking game environments.
+PixPox is a 2D Game Engine with advanced capabilities for implementing Cellular Automata interactions. It incorporates seamless multithreading capabilities while providing developers with powerful abstractions that simplify the development process.
 
 ## Features
-- Entity Component System architecture for scalable and modular game development.
-- Advanced cellular automata capabilities.
-- Cross-platform compatibility for deployment on multiple devices and platforms.
+- Entity-Component-System based architecture for scalable and modular project development.
+- Cellular Automata utilities for building "Falling Sand"-style simulations.
 - Input handling, event messaging, and resource management abstractions for simplified development.
 - Lightweight and optimized for performance.
+- Built in Rust for maximum performance.
 
 ## Getting Started
-
-A good place to start learning how to use PixPox is the devdocs, which showcase the engine's architecture. You can access the devdocs [here](https://martinteoharov.github.io/pixpox-dev-docs/).
+A good place to start learning how to build projects with PixPox is the devdocs, which showcase the engine's architecture. You can access the devdocs [here](https://martinteoharov.github.io/pixpox-dev-docs/).
 
 ### Examples
 PixPox comes with several example projects to demonstrate the engine's capabilities.
-
 ```rust
-cargo run --example <example_name>
+RUST_LOG=error cargo run --example <example_name> --release
+```
+
+For instance, to run the "ecs" example, execute the following command:
+```rust
+RUST_LOG=error cargo run --example ecs --release
 ```
 
 ### Contributions
-We welcome contributions from developers who are interested in improving the engine. To contribute, simply fork the repository, make your changes, and submit a pull request.
+We welcome contributions from developers who are interested in improving the engine. To contribute, simply make a pull request.
 
 ### License
 PixPox is licensed under the MIT License. See the LICENSE file for details.
