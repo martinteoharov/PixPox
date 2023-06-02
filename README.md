@@ -1,4 +1,8 @@
 # PixPox
+
+![Rust Workflow Status](https://img.shields.io/github/actions/workflow/status/martinteoharov/PixPox/.github/workflows/rust.yml?branch=main&label=Rust&logo=github&style=flat-square)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 <img src="https://user-images.githubusercontent.com/43793073/234361085-053432ef-b9fe-4581-9795-4ddba162bf0c.png" alt="Image" width="400" height="200">
 
 PixPox is a 2D Game Engine with advanced capabilities for implementing Cellular Automata interactions. It incorporates seamless multithreading capabilities while providing developers with powerful abstractions that simplify the development process.
