@@ -24,7 +24,7 @@ use pixpox_ecs::entity::Entity;
 use pixpox_ecs::{Run, InputHandler};
 use pixpox_ecs::{world, Texture};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
-use pixpox_renderer::Camera;
+use pixpox_common::Camera;
 use pixpox_utils::{Stats, conway::ConwayGrid, CA::letters};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};

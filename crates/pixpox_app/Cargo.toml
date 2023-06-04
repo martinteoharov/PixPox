@@ -13,10 +13,11 @@ log = "0.4"
 winit_input_helper = "0.13.0"
 raw-window-handle = "0.5"
 string-interner = "0.14.0"
+serde_derive = "1.0.152"
+serde = "1.0.152"
 
 
 # Local crates
 pixpox_ecs = { path = "../pixpox_ecs" }
 pixpox_renderer = { path = "../pixpox_renderer" }
-serde_derive = "1.0.152"
-serde = "1.0.152"
+pixpox_common = { path = "../pixpox_common" }

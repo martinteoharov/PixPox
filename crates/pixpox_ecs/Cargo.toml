@@ -21,4 +21,4 @@ lasso = { version = "0.6.0", features = ["multi-threaded"] }
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
-pixpox_renderer = { path = "../pixpox_renderer" }
+pixpox_common = { path = "../pixpox_common" }

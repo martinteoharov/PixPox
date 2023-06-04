@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use serde_derive::{Deserialize, Serialize};
 
-use pixpox_renderer::{gui::Gui, Camera, Pixels, SurfaceTexture};
+use pixpox_renderer::{gui::Gui, Pixels, SurfaceTexture, GlobalPixelMap};
 use winit::{
     dpi::LogicalSize,
     event::{Event, VirtualKeyCode},
@@ -12,7 +12,9 @@ use winit::{
     window::{Fullscreen, WindowBuilder},
 };
 
-use pixpox_ecs::{component::Texture as RenderTexture, World};
+use pixpox_common::Camera;
+
+use pixpox_ecs::{component::Texture as RenderTexture, GlobalPixelMap as GlobalPixelMapTrait, World};
 use winit_input_helper::WinitInputHelper;
 
 use log::{error, info};
@@ -93,7 +95,7 @@ impl<'a> App<'a> {
         }
     }
 
-    pub async fn run<T: 'static + RenderTexture>(&mut self) {
+    pub async fn run(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
             // debug!("Event loop");
             let mut camera: Camera;
@@ -101,7 +103,7 @@ impl<'a> App<'a> {
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
                 // Run components
-                self.world.run::<T>();
+                self.world.run();
 
                 // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
@@ -111,7 +113,7 @@ impl<'a> App<'a> {
 
                 // Fetch Global Pixelmap
                 let pixelmap = storage
-                    .query_global_pixel_map::<T>()
+                    .query_global_pixel_map::<GlobalPixelMap>()
                     .expect("Could not query Pixel Map");
 
                 camera = pixelmap.get_camera();
@@ -158,7 +160,7 @@ impl<'a> App<'a> {
                 let mut storage = self.world.storage.write().unwrap();
 
                 let pixelmap = storage
-                    .query_global_pixel_map::<T>()
+                    .query_global_pixel_map::<GlobalPixelMap>()
                     .expect("Could not query Pixel Map");
 
                 camera = pixelmap.get_camera();

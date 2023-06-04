@@ -41,8 +41,9 @@ use std::num::NonZeroU32;
 use thiserror::Error;
 pub use wgpu;
 pub mod gui;
-pub mod camera;
-pub use camera::{Camera, Direction};
+
+pub mod global_pixel_map;
+pub use global_pixel_map::GlobalPixelMap;
 
 mod builder;
 

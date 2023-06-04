@@ -42,6 +42,7 @@ pixpox_ecs = { path = "crates/pixpox_ecs" }
 pixpox_physics = { path = "crates/pixpox_physics" }
 pixpox_renderer = { path = "crates/pixpox_renderer" }
 pixpox_utils = { path = "crates/pixpox_utils" }
+pixpox_common = { path = "crates/pixpox_common" }
 
 [dependencies.confy]
 version = "0.5.1"

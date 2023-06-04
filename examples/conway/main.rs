@@ -2,7 +2,8 @@
 #![allow(dead_code)]
 
 pub mod custom_components;
-pub mod global_pixel_map;
+use pixpox_renderer::global_pixel_map::GlobalPixelMap;
+use pixpox_common::{Camera, Direction};
 
 extern crate dotenv;
 
@@ -28,8 +29,6 @@ use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 use winit_input_helper::WinitInputHelper;
 
-use crate::global_pixel_map::GlobalPixelMap;
-use pixpox_renderer::{Camera, Direction};
 
 use crate::custom_components::ConwayGridComponent;
 

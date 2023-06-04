@@ -18,8 +18,10 @@ use std::{
 use log::{debug, error, info};
 use pixpox_utils::stats::Stats;
 use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
-use winit::event::{VirtualKeyCode, Event};
+use winit::event::{Event, VirtualKeyCode};
 use winit_input_helper::WinitInputHelper;
+
+use pixpox_utils::InputHandler;
 
 use crate::{
     component::{self},
@@ -52,39 +54,6 @@ fn print_type_of<T>(_: &T) {
 pub enum BucketAction {
     GET,
     PUT,
-}
-
-pub struct InputHandler {
-    pub winit: WinitInputHelper,
-    pub mouse: (isize, isize),
-    pub mouse_prev: (isize, isize),
-    pub scale: f32,
-}
-
-impl InputHandler {
-    pub fn new() -> Self {
-        Self {
-            winit: WinitInputHelper::new(),
-            mouse: (0, 0),
-            mouse_prev: (0, 0),
-            scale: 1.0
-        }
-    }
-
-    pub fn update(&mut self, event: &Event<()>, mouse_pos: (isize, isize), prev_mouse_pos: (isize, isize)) {
-        self.winit.update(event);
-        self.mouse = mouse_pos;
-        self.mouse_prev = prev_mouse_pos;
-    }
-
-    pub fn update_scale (&mut self, scale: f32) {
-        self.scale = scale;
-    }
-
-    // Calculate mousepos based on scale
-    pub fn get_mouse_pos(&self) -> (isize, isize) {
-        (self.mouse.0 / self.scale as isize, self.mouse.1 / self.scale as isize)
-    }
 }
 
 // TODO: Add a field for tick speed
@@ -239,7 +208,7 @@ impl World {
          */
     }
 
-    pub fn run<T: 'static + Texture>(&mut self) {
+    pub fn run(&mut self) {
         self.stats.new_tick();
 
         if self.paused {
@@ -260,9 +229,8 @@ impl World {
             component_vec.update_all(&mut self.storage, &mut self.input);
         }
         let mut storage = self.storage.write().expect("Could not lock storage");
-        storage.update_global_pixel_map::<T>(&self.input);
+        storage.update_global_pixel_map(&self.input);
 
-    
         let elapsed = Instant::now() - now;
         self.stats.update_sector("update()", elapsed.as_secs_f32());
     }

@@ -1,8 +1,9 @@
 use log::{debug, error};
-use pixpox_ecs::{InputHandler, Texture, Update};
+use pixpox_ecs::{Texture, GlobalPixelMap as GlobalPixelMapTrait, Update};
+use pixpox_utils::InputHandler;
 use winit::event::VirtualKeyCode;
 
-use pixpox_renderer::{Camera, Direction};
+use pixpox_common::{Camera, Direction};
 
 #[derive(Debug)]
 pub struct GlobalPixelMap {
@@ -58,7 +59,7 @@ impl GlobalPixelMap {
 
     /// Returns index of the position in the grid
     /// * `pos`: (isize, isize) - (column, row) coordinates
-    pub fn get_idx(&self, pos: (isize, isize)) -> usize {
+    fn get_idx(&self, pos: (isize, isize)) -> usize {
         let idx = pos.1 * self.window_width as isize + pos.0;
         idx as usize
     }
@@ -66,7 +67,7 @@ impl GlobalPixelMap {
     /// Draws a pixel at the given position with the given color.
     /// * `pos`: the position of the pixel to draw.
     /// * `color`: the color to use when drawing the pixel.
-    pub fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
+    fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
         let idx = self.get_idx(pos);
         self.pixelmap[idx as usize] = color;
     }
@@ -148,7 +149,7 @@ impl GlobalPixelMap {
     }
 }
 
-impl Texture for GlobalPixelMap {
+impl GlobalPixelMapTrait for GlobalPixelMap {
     fn render(&self, pixels: &mut [u8]) {
         let pixelmap = self.extract_and_scale_visible_region(&self.camera);
 
@@ -161,6 +162,7 @@ impl Texture for GlobalPixelMap {
         }
     }
 
+    // TODO: Handle input with callbacks
     fn update(&mut self, input: &InputHandler) {
         let scroll_delta = input.winit.scroll_diff();
         // log::error!("update() mouse scroll delta: [{}]", scroll_delta);

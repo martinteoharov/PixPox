@@ -1,7 +1,8 @@
 use std::sync::RwLock;
 
-use crate::{Storage, InputHandler};
-use pixpox_renderer::Camera;
+use crate::{Storage};
+use pixpox_utils::InputHandler;
+use pixpox_common::Camera;
 
 /// The Label trait is used to give a human-readable label to an ECS component.
 /// Every component must implement this trait in order to be used with the PixPox game engine.
@@ -94,6 +95,13 @@ pub trait Update {
 /// }
 /// ```
 pub trait Texture {
+    fn render(&self, pixels: &mut [u8]);
+    fn update(&mut self, input: &InputHandler);
+    fn size(&self) -> (u32, u32);
+    fn get_camera(&self) -> Camera;
+}
+
+pub trait GlobalPixelMap {
     fn render(&self, pixels: &mut [u8]);
     fn update(&mut self, input: &InputHandler);
     fn size(&self) -> (u32, u32);

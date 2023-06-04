@@ -1499,6 +1499,7 @@ dependencies = [
  "line_drawing",
  "log",
  "pixpox_app",
+ "pixpox_common",
  "pixpox_ecs",
  "pixpox_physics",
  "pixpox_renderer",
@@ -1517,6 +1518,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
+ "pixpox_common",
  "pixpox_ecs",
  "pixpox_renderer",
  "raw-window-handle 0.5.0",
@@ -1529,6 +1531,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pixpox_common"
+version = "0.1.0"
+
+[[package]]
 name = "pixpox_ecs"
 version = "0.1.0"
 dependencies = [
@@ -1538,7 +1544,7 @@ dependencies = [
  "env_logger",
  "lasso",
  "log",
- "pixpox_renderer",
+ "pixpox_common",
  "pixpox_utils",
  "queues",
  "rayon",
@@ -1562,6 +1568,8 @@ dependencies = [
  "imgui-wgpu",
  "imgui-winit-support",
  "log",
+ "pixpox_common",
+ "pixpox_ecs",
  "pixpox_utils",
  "pollster",
  "rand",
@@ -1579,6 +1587,8 @@ dependencies = [
  "log",
  "rand",
  "rayon",
+ "winit",
+ "winit_input_helper",
 ]
 
 [[package]]

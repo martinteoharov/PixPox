@@ -13,7 +13,7 @@ use winit::{
 };
 use winit_input_helper::WinitInputHelper;
 
-use crate::global_pixel_map::GlobalPixelMap;
+use pixpox_renderer::global_pixel_map::GlobalPixelMap;
 
 #[derive(Clone)]
 pub struct ConwayGridComponent {

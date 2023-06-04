@@ -1,11 +1,11 @@
 use lasso::{Spur, ThreadedRodeo};
+use log::debug;
 
-use std::{
-    any::Any,
-    collections::{HashMap},
-};
+use std::{any::Any, collections::HashMap};
 
-use crate::{Texture, InputHandler};
+use crate::GlobalPixelMap as GlobalPixelMapTrait;
+use crate::Texture;
+pub use pixpox_utils::InputHandler;
 
 pub enum BucketAction {
     GET,
@@ -109,9 +109,7 @@ impl Storage {
         None
     }
 
-    pub fn query_global_pixel_map<T: 'static + Texture>(
-        &mut self,
-    ) -> Option<&mut T> {
+    pub fn query_global_pixel_map<T: 'static + GlobalPixelMapTrait>(&mut self) -> Option<&mut dyn GlobalPixelMapTrait> {
         let key = &self
             .interner
             .get("pixelmap")
@@ -123,9 +121,7 @@ impl Storage {
         );
 
         if let Some(data) = self.buckets.get_mut(key) {
-            // debug!("Storage::query_storage() - label found");
             if let Some(downcasted) = data.downcast_mut::<T>() {
-                // debug!("Storage::query_storage() - value downcasted successfully");
                 return Some(downcasted);
             }
         }
@@ -133,9 +129,7 @@ impl Storage {
         None
     }
 
-    pub fn update_global_pixel_map<T: 'static + Texture>(
-        &mut self, input: &InputHandler
-    ) {
+    pub fn update_global_pixel_map(&mut self, input: &InputHandler) {
         let key = &self
             .interner
             .get("pixelmap")
@@ -147,15 +141,16 @@ impl Storage {
         );
 
         if let Some(data) = self.buckets.get_mut(key) {
-            // debug!("Storage::query_storage() - label found");
-            if let Some(downcasted) = data.downcast_mut::<T>() {
-                // debug!("Storage::query_storage() - value downcasted successfully");
-                downcasted.update(&input);
+            if let Some(downcasted) = data.downcast_mut::<Box<dyn GlobalPixelMapTrait>>() {
+                downcasted.update(input);
             }
         }
     }
 
-    pub fn new_global_pixel_map<T: 'static + Texture + Send + Sync>(&mut self, pixelmap: T) {
+    pub fn new_global_pixel_map<T: 'static + GlobalPixelMapTrait + Send + Sync>(
+        &mut self,
+        pixelmap: T,
+    ) {
         let key = self.interner.get_or_intern("pixelmap");
 
         self.buckets.insert(key, Box::new(pixelmap));

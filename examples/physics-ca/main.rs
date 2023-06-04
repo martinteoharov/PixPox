@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 pub mod custom_components;
-pub mod global_pixel_map;
 
 extern crate dotenv;
 
@@ -23,7 +22,7 @@ use pixpox_ecs::entity::Entity;
 use pixpox_ecs::{world, InputHandler, Texture, World};
 use pixpox_ecs::{Run, Update};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
-use pixpox_renderer::Camera;
+use pixpox_common::Camera;
 use pixpox_utils::CA::cell_realm::CellRealm;
 use pixpox_utils::{conway::ConwayGrid, Stats};
 use rand::Rng;
@@ -32,7 +31,8 @@ use winit::event::{DeviceEvent, Event, MouseButton, VirtualKeyCode};
 use winit_input_helper::WinitInputHelper;
 
 use crate::custom_components::CellRealmComponent;
-use crate::global_pixel_map::GlobalPixelMap;
+
+use pixpox_renderer::global_pixel_map::GlobalPixelMap;
 
 const WINDOW_TITLE: &str = "pixpox!";
 
@@ -112,10 +112,10 @@ async fn run() {
     {
         let mut storage = app.world.storage.write().unwrap();
 
-        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+        storage.new_global_pixel_map::<GlobalPixelMap>(global_pixel_map);
 
         storage.new_bucket::<usize>("selected-tool", 0);
     }
 
-    app.run::<GlobalPixelMap>().await;
+    app.run().await;
 }

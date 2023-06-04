@@ -1,5 +1,3 @@
-use log::debug;
-
 pub enum Direction {
     Up,
     Down,

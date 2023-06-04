@@ -20,3 +20,5 @@ imgui-wgpu = "0.22.0"
 
 # Local Crates
 pixpox_utils = { path = "../pixpox_utils" }
+pixpox_ecs = { path = "../pixpox_ecs" }
+pixpox_common = { path = "../pixpox_common" }

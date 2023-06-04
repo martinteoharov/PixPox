@@ -1,9 +1,3 @@
-use rand::Rng;
-use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
-use std::collections::HashMap;
-
 #[derive(Copy, Clone, PartialEq)]
 pub enum Cell {
     EMPTY,

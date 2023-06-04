@@ -1,0 +1,3502 @@
+../crates/pixpox_app/Cargo.toml begin
+[package]
+name = "pixpox_app"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+wgpu = "0.13"
+winit = "0.27"
+env_logger = "0.9"
+log = "0.4"
+winit_input_helper = "0.13.0"
+raw-window-handle = "0.5"
+string-interner = "0.14.0"
+serde_derive = "1.0.152"
+serde = "1.0.152"
+
+
+# Local crates
+pixpox_ecs = { path = "../pixpox_ecs" }
+pixpox_renderer = { path = "../pixpox_renderer" }
+pixpox_common = { path = "../pixpox_common" }
+../crates/pixpox_app/Cargo.toml end
+../crates/pixpox_app/src/lib.rs begin
+use std::fmt::Debug;
+
+use serde_derive::{Deserialize, Serialize};
+
+use pixpox_renderer::{gui::Gui, Pixels, SurfaceTexture};
+use winit::{
+    dpi::LogicalSize,
+    event::{Event, VirtualKeyCode},
+    event_loop::{ControlFlow, EventLoop},
+    platform::run_return::EventLoopExtRunReturn,
+    window::Window,
+    window::{Fullscreen, WindowBuilder},
+};
+
+use pixpox_common::Camera;
+
+use pixpox_ecs::{component::Texture as RenderTexture, World};
+use winit_input_helper::WinitInputHelper;
+
+use log::{error, info};
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+pub struct Config {
+    pub window_title: String,
+    pub window_height: u32,
+    pub window_width: u32,
+    pub window_scale: f32,
+    pub window_fullscreen: bool,
+}
+
+pub struct App<'a> {
+    pub world: World,
+    pixels: Pixels,
+    pub gui: Gui<'a>,
+    event_loop: EventLoop<()>,
+    window: Window,
+    input: WinitInputHelper,
+    config: Config,
+}
+
+impl<'a> App<'a> {
+    // Create a new application. Panics if renderer can not be initialized.
+    pub fn new(config: Config) -> App<'a> {
+        // Initialize WGPU logging
+        env_logger::init();
+
+        let world = World::new();
+
+        // Define the event loop
+        let event_loop = EventLoop::new();
+        let input = WinitInputHelper::new();
+
+        let window = {
+            let size = LogicalSize::new(config.window_width as f64, config.window_height as f64);
+            let scaled_size = LogicalSize::new(
+                config.window_width as f32 * config.window_scale,
+                config.window_height as f32 * config.window_scale,
+            );
+            let mut window = WindowBuilder::new()
+                .with_title(config.window_title.clone())
+                .with_inner_size(scaled_size)
+                .with_min_inner_size(size);
+
+            if config.window_fullscreen {
+                window = window.with_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+
+            window.build(&event_loop).unwrap()
+        };
+
+        let pixels = {
+            let window_size = window.inner_size();
+            let surface_texture =
+                SurfaceTexture::new(window_size.width, window_size.height, &window);
+
+            match Pixels::new(config.window_width, config.window_height, surface_texture) {
+                Ok(v) => v,
+                Err(_e) => {
+                    println!("Could not initialize renderer");
+                    panic!()
+                },
+            }
+        };
+
+        let gui = Gui::new(&window, &pixels);
+
+        Self {
+            world,
+            pixels,
+            gui,
+            input,
+            event_loop,
+            window,
+            config,
+        }
+    }
+
+    pub async fn run<T: 'static + RenderTexture>(&mut self) {
+        self.event_loop.run_return(|event, _target, control_flow| {
+            // debug!("Event loop");
+            let mut camera: Camera;
+
+            // The one and only event that winit_input_helper doesn't have for us...
+            if let Event::RedrawRequested(_) = event {
+                // Run components
+                self.world.run::<T>();
+
+                // Get screen frame to render to
+                let pixels = self.pixels.get_frame_mut();
+
+                // Lock storage
+                let mut storage = self.world.storage.write().unwrap();
+
+                // Fetch Global Pixelmap
+                let pixelmap = storage
+                    .query_global_pixel_map::<T>()
+                    .expect("Could not query Pixel Map");
+
+                camera = pixelmap.get_camera();
+
+                // Render Global Pixelmap to frame
+                pixelmap.render(pixels);
+
+                // Prepare Dear ImGui
+                self.gui
+                    .prepare(&self.window)
+                    .expect("gui.prepare() failed");
+
+                let _render_result = self.pixels.render_with(|encoder, render_target, context| {
+                    // Render the world texture
+                    context.scaling_renderer.render(encoder, render_target);
+
+                    // Render Dear ImGui
+                    self.gui.render(
+                        &self.window,
+                        encoder,
+                        render_target,
+                        context,
+                        &self.world.stats,
+                    )?;
+
+                    Ok(())
+                });
+            }
+
+            // Handle input events
+            self.gui.handle_event(&self.window, &event);
+            let mut mouse_cell: (isize, isize) = (0, 0);
+            let mut mouse_prev_cell: (isize, isize) = (0, 0);
+
+            // For everything else, for let winit_input_helper collect events to build its state.
+            // It returns `true` when it is time to update our game state and request a redraw.
+            if self.input.update(&event) {
+                // Close events
+                if self.input.key_pressed(VirtualKeyCode::Escape) || self.input.quit() {
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+
+                let mut storage = self.world.storage.write().unwrap();
+
+                let pixelmap = storage
+                    .query_global_pixel_map::<T>()
+                    .expect("Could not query Pixel Map");
+
+                camera = pixelmap.get_camera();
+
+                // Handle mouse. This is a bit involved since support some simple
+                // line drawing (mostly because it makes nice looking patterns).
+                (mouse_cell, mouse_prev_cell) = self
+                    .input
+                    .mouse()
+                    .map(|(mx, my)| {
+                        let (dx, dy) = self.input.mouse_diff();
+                        let prev_x = mx - dx;
+                        let prev_y = my - dy;
+
+                        let (mx_i, my_i) = self
+                            .pixels
+                            .window_pos_to_pixel((mx, my))
+                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+
+                        let (px_i, py_i) = self
+                            .pixels
+                            .window_pos_to_pixel((prev_x, prev_y))
+                            .unwrap_or_else(|pos| self.pixels.clamp_pixel_pos(pos));
+
+                        let sf_width = self.config.window_width as f32 / camera.get_width() as f32;
+                        let sf_height =
+                            self.config.window_height as f32 / camera.get_height() as f32;
+
+                        let camera_mx_i =
+                            (mx_i as f32 / sf_width).floor() as isize + camera.get_x() as isize;
+                        let camera_my_i =
+                            (my_i as f32 / sf_height).floor() as isize + camera.get_y() as isize;
+
+                        let camera_px_i =
+                            (px_i as f32 / sf_width).floor() as isize + camera.get_x() as isize;
+                        let camera_py_i =
+                            (py_i as f32 / sf_height).floor() as isize + camera.get_y() as isize;
+
+                        ((camera_mx_i, camera_my_i), (camera_px_i, camera_py_i))
+                    })
+                    .unwrap_or_default();
+
+                // Resize the window
+                if let Some(size) = self.input.window_resized() {
+                    info!("Resize detected");
+                    if let Err(err) = self.pixels.resize_surface(size.width, size.height) {
+                        error!("pixels.resize_surface() failed: {err}");
+                        *control_flow = ControlFlow::Exit;
+                        return;
+                    }
+                }
+
+                self.window.request_redraw();
+            }
+
+            self.world.input.update(&event, mouse_cell, mouse_prev_cell);
+        });
+    }
+}
+
+../crates/pixpox_app/src/lib.rs end
+../crates/pixpox_physics/Cargo.toml begin
+[package]
+name = "pixpox_physics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+../crates/pixpox_physics/Cargo.toml end
+../crates/pixpox_physics/src/lib.rs begin
+/* physics/mod.rs
+ *
+ * This file is the entry point for the physics system.
+ */
+../crates/pixpox_physics/src/lib.rs end
+../crates/pixpox_physics/src/compute/mod.rs begin
+/* physics/compute/mod.rs
+ *
+ * This file is responsible for handling physics with compute shaders.
+ * It includes definitions for the automata of the various 
+ * physics in play & the shaders.
+ */
+
+../crates/pixpox_physics/src/compute/mod.rs end
+../crates/pixpox_renderer/Cargo.toml begin
+[package]
+name = "pixpox_renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "0.27"
+env_logger = "0.9"
+log = "0.4"
+wgpu = "0.15"
+pollster = "0.2"
+bytemuck = { version = "1.4", features = [ "derive" ] }
+rand = "0.8"
+ultraviolet = "0.9"
+raw-window-handle = "0.5"
+thiserror = "1.0"
+imgui = "0.10.0"
+imgui-winit-support = "0.10.0"
+imgui-wgpu = "0.22.0"
+
+# Local Crates
+pixpox_utils = { path = "../pixpox_utils" }
+pixpox_ecs = { path = "../pixpox_ecs" }
+pixpox_common = { path = "../pixpox_common" }
+
+../crates/pixpox_renderer/Cargo.toml end
+../crates/pixpox_renderer/src/global_pixel_map.rs begin
+use log::{debug, error};
+use pixpox_ecs::{Texture, Update};
+use pixpox_utils::InputHandler;
+use winit::event::VirtualKeyCode;
+
+use pixpox_common::{Camera, Direction};
+
+#[derive(Debug)]
+pub struct GlobalPixelMap {
+    pixelmap: Vec<[u8; 4]>,
+    window_width: u32,
+    window_height: u32,
+    camera: Camera,
+}
+
+impl GlobalPixelMap {
+    /// Creates a new empty pixelmap with the given dimensions.
+    /// The pixelmap is initially filled with the given clear color.
+    ///
+    /// ### Arguments
+    ///
+    /// * `window_width` - The width of the pixelmap in pixels.
+    /// * `window_height` - The height of the pixelmap in pixels.
+    ///
+    /// ### Returns
+    ///
+    /// A new PixelMap instance.
+    ///
+    /// ### Example
+    ///
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// let pixelmap = PixelMap::new_empty(640, 480);
+    /// ```
+    pub fn new_empty(window_height: u32, window_width: u32, camera: Camera) -> Self {
+        debug!("camera width: {}, window_width: {}", camera.get_width(), camera.get_height());
+        // assert camera fits pixelmap dimensions
+        assert!(
+            camera.get_width() <= window_width && camera.get_height() <= window_height,
+            "Camera dimensions must be smaller than pixelmap dimensions"
+        );
+
+        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
+
+        for _y in 0..window_height {
+            for _x in 0..window_width {
+                let c: [u8; 4] = [0, 0, 0, 0];
+                pixelmap.push(c);
+            }
+        }
+
+        Self {
+            pixelmap,
+            window_width,
+            window_height,
+            camera,
+        }
+    }
+
+    /// Returns index of the position in the grid
+    /// * `pos`: (isize, isize) - (column, row) coordinates
+    fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.window_width as isize + pos.0;
+        idx as usize
+    }
+
+    /// Draws a pixel at the given position with the given color.
+    /// * `pos`: the position of the pixel to draw.
+    /// * `color`: the color to use when drawing the pixel.
+    fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
+        let idx = self.get_idx(pos);
+        self.pixelmap[idx as usize] = color;
+    }
+
+    /// Draws a flat vector of pixels to the screen.
+    /// * `vec`: the vector of pixels to draw.
+    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
+        std::mem::swap(&mut self.pixelmap, vec);
+    }
+
+    /// Extracts and scales the camera pixelmap to the window pixelmap.
+    /// * `camera`: the camera to use for extracting the visible region.
+    /// ### Example
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// # use camera::Camera;
+    /// let mut pixelmap = PixelMap::new_empty(640, 480);
+    /// let camera = Camera::new(0, 0, 320, 240);
+    /// pixelmap.extract_and_scale_visible_region(&camera);
+    /// ```
+    /// ### Returns
+    /// A vector of pixels representing the visible region of the camera.
+    /// The vector is scaled to the window dimensions.
+    pub fn extract_and_scale_visible_region(&self, camera: &Camera) -> Vec<[u8; 4]> {
+        debug!(
+            "extract_and_scale_visible_region() called with camera: {:?}",
+            camera
+        );
+
+        let sf_width = self.window_width as f32 / camera.get_width() as f32;
+        let sf_height = self.window_height as f32 / camera.get_height() as f32;
+        // let sf = sf_width.min(sf_height).ceil() as u32;
+        let sfw = sf_width.ceil() as u32;
+        let sfh = sf_height.ceil() as u32;
+
+        debug!(
+            "region: [window_width: {}, camera.width: {} | window.height: {}, camera.height: {}]",
+            self.window_width,
+            camera.get_width(),
+            self.window_height,
+            camera.get_height()
+        );
+ 
+        debug!("sfw: {}", sfw);
+        debug!("sfh: {}", sfh);
+
+        // scale camera_pixelmap to window_pixelmap
+        let mut window_pixelmap = vec![[0; 4]; (self.window_width * self.window_height) as usize];
+        for camera_y in camera.get_y()..(camera.get_y() + camera.get_height()) {
+            for camera_x in camera.get_x()..(camera.get_x() + camera.get_width()) {
+                // calculate real indexes
+                let (real_x, real_y) = (camera_x - camera.get_x(), camera_y - camera.get_y());
+
+                // calculate camera index
+                let camera_idx = self.get_idx((camera_x as isize, camera_y as isize));
+
+                // ensure camera index is in bounds
+                if camera_idx >= self.pixelmap.len() {
+                    continue;
+                }
+
+                // get camera pixel value to scale
+                let pixel_value = self.pixelmap[camera_idx as usize];
+
+                // scale camera pixel value to real window
+                for dy in 0..sfh {
+                    for dx in 0..sfw {
+                        let s_x = (real_x * sfw + dx).clamp(0, self.window_width as u32 - 1);
+                        let s_y = (real_y * sfh + dy).clamp(0, self.window_height as u32 - 1);
+                        let s_idx = s_y as usize * self.window_width as usize + s_x as usize;
+
+                        window_pixelmap[s_idx] = pixel_value;
+                    }
+                }
+            }
+        }
+
+        window_pixelmap
+    }
+}
+
+impl Texture for GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]) {
+        let pixelmap = self.extract_and_scale_visible_region(&self.camera);
+
+        debug!("pixelmap len: {}", pixelmap.len());
+
+        let pixel_chunks = pixels.chunks_exact_mut(4);
+
+        for (c, pix) in pixelmap.iter().zip(pixel_chunks) {
+            pix.copy_from_slice(c);
+        }
+    }
+
+    // TODO: Handle input with callbacks
+    fn update(&mut self, input: &InputHandler) {
+        let scroll_delta = input.winit.scroll_diff();
+        // log::error!("update() mouse scroll delta: [{}]", scroll_delta);
+
+        // if scroll up, zoom in
+        if scroll_delta >= 1.0 {
+            self.camera.zoom(0.8);
+        }
+
+        // if scroll down, zoom out
+        if scroll_delta <= -1.0 {
+            self.camera.zoom(1.2);
+        }
+
+        // if key D is pressed, move camera right
+        if input.winit.key_held(VirtualKeyCode::D) {
+            self.camera.move_direction(Direction::Right);
+        }
+
+        // if key A is held, move camera left
+        if input.winit.key_held(VirtualKeyCode::A) {
+            self.camera.move_direction(Direction::Left);
+        }
+
+        // if key W is held, move camera up
+        if input.winit.key_held(VirtualKeyCode::W) {
+            self.camera.move_direction(Direction::Up);
+        }
+
+        // if key S is held, move camera down
+        if input.winit.key_held(VirtualKeyCode::S) {
+            self.camera.move_direction(Direction::Down);
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.window_width, self.window_height);
+    }
+
+    fn get_camera(&self) -> Camera {
+        self.camera.clone()
+    }
+}
+
+../crates/pixpox_renderer/src/global_pixel_map.rs end
+../crates/pixpox_renderer/src/renderer.rs begin
+use crate::SurfaceSize;
+use ultraviolet::Mat4;
+use wgpu::util::DeviceExt;
+
+/// The default renderer that scales your frame to the screen size.
+#[derive(Debug)]
+pub struct ScalingRenderer {
+    vertex_buffer: wgpu::Buffer,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    render_pipeline: wgpu::RenderPipeline,
+    pub(crate) clear_color: wgpu::Color,
+    width: f32,
+    height: f32,
+    clip_rect: (u32, u32, u32, u32),
+}
+
+impl ScalingRenderer {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        texture_view: &wgpu::TextureView,
+        texture_size: &wgpu::Extent3d,
+        surface_size: &SurfaceSize,
+        render_texture_format: wgpu::TextureFormat,
+        clear_color: wgpu::Color,
+        blend_state: wgpu::BlendState,
+    ) -> Self {
+        let shader = wgpu::include_wgsl!("shaders/scale.wgsl");
+        let module = device.create_shader_module(shader);
+
+        // Create a texture sampler with nearest neighbor
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("pixels_scaling_renderer_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 1.0,
+            compare: None,
+            anisotropy_clamp: None,
+            border_color: None,
+        });
+
+        // Create vertex buffer; array-of-array of position and texture coordinates
+        let vertex_data: [[f32; 2]; 3] = [
+            // One full-screen triangle
+            // See: https://github.com/parasyte/pixels/issues/180
+            [-1.0, -1.0],
+            [3.0, -1.0],
+            [-1.0, 3.0],
+        ];
+        let vertex_data_slice = bytemuck::cast_slice(&vertex_data);
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pixels_scaling_renderer_vertex_buffer"),
+            contents: vertex_data_slice,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let vertex_buffer_layout = wgpu::VertexBufferLayout {
+            array_stride: (vertex_data_slice.len() / vertex_data.len()) as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 0,
+                shader_location: 0,
+            }],
+        };
+
+        // Create uniform buffer
+        let matrix = ScalingMatrix::new(
+            (texture_size.width as f32, texture_size.height as f32),
+            (surface_size.width as f32, surface_size.height as f32),
+        );
+        let transform_bytes = matrix.as_bytes();
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pixels_scaling_renderer_matrix_uniform_buffer"),
+            contents: transform_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pixels_scaling_renderer_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(transform_bytes.len() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pixels_scaling_renderer_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Create pipeline
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pixels_scaling_renderer_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pixels_scaling_renderer_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: "vs_main",
+                buffers: &[vertex_buffer_layout],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_texture_format,
+                    blend: Some(blend_state),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            
+            multiview: None,
+        });
+
+        // Create clipping rectangle
+        let clip_rect = matrix.clip_rect();
+
+        Self {
+            vertex_buffer,
+            uniform_buffer,
+            bind_group,
+            render_pipeline,
+            clear_color,
+            width: texture_size.width as f32,
+            height: texture_size.height as f32,
+            clip_rect,
+        }
+    }
+
+    /// Draw the pixel buffer to the render target.
+    pub fn render(&self, encoder: &mut wgpu::CommandEncoder, render_target: &wgpu::TextureView) {
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("pixels_scaling_renderer_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: render_target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(self.clear_color),
+                    store: true,
+                },
+            })],
+            depth_stencil_attachment: None,
+        });
+        rpass.set_pipeline(&self.render_pipeline);
+        rpass.set_bind_group(0, &self.bind_group, &[]);
+        rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        rpass.set_scissor_rect(
+            self.clip_rect.0,
+            self.clip_rect.1,
+            self.clip_rect.2,
+            self.clip_rect.3
+        );
+        rpass.draw(0..3, 0..1);
+    }
+
+    /// Get the clipping rectangle for the scaling renderer.
+    ///
+    /// This rectangle defines the inner bounds of the surface texture, without the border.
+    pub fn clip_rect(&self) -> (u32, u32, u32, u32) {
+        self.clip_rect
+    }
+
+    pub(crate) fn resize(&mut self, queue: &wgpu::Queue, width: u32, height: u32) {
+        let matrix = ScalingMatrix::new((self.width, self.height), (width as f32, height as f32));
+        let transform_bytes = matrix.as_bytes();
+        queue.write_buffer(&self.uniform_buffer, 0, transform_bytes);
+
+        self.clip_rect = matrix.clip_rect();
+    }
+}
+
+#[derive(Debug)]
+pub struct ScalingMatrix {
+    pub(crate) transform: Mat4,
+    clip_rect: (u32, u32, u32, u32),
+}
+
+impl ScalingMatrix {
+    // texture_size is the dimensions of the drawing texture
+    // screen_size is the dimensions of the surface being drawn to
+    pub(crate) fn new(texture_size: (f32, f32), screen_size: (f32, f32)) -> Self {
+        let (texture_width, texture_height) = texture_size;
+        let (screen_width, screen_height) = screen_size;
+
+        let width_ratio = (screen_width / texture_width).max(1.0);
+        let height_ratio = (screen_height / texture_height).max(1.0);
+
+        // Get smallest scale size
+        let scale = width_ratio.clamp(1.0, height_ratio).floor();
+
+        let scaled_width = texture_width * scale;
+        let scaled_height = texture_height * scale;
+
+        // Create a transformation matrix
+        let sw = scaled_width / screen_width;
+        let sh = scaled_height / screen_height;
+        let tx = (screen_width / 2.0).fract() / screen_width;
+        let ty = (screen_height / 2.0).fract() / screen_height;
+        #[rustfmt::skip]
+        let transform: [f32; 16] = [
+            sw,  0.0, 0.0, 0.0,
+            0.0, sh,  0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            tx,  ty,  0.0, 1.0,
+        ];
+
+        // Create a clipping rectangle
+        let clip_rect = {
+            let scaled_width = scaled_width.min(screen_width);
+            let scaled_height = scaled_height.min(screen_height);
+            let x = ((screen_width - scaled_width) / 2.0) as u32;
+            let y = ((screen_height - scaled_height) / 2.0) as u32;
+
+            (x, y, scaled_width as u32, scaled_height as u32)
+        };
+
+        Self {
+            transform: Mat4::from(transform),
+            clip_rect,
+        }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        self.transform.as_byte_slice()
+    }
+
+    pub(crate) fn clip_rect(&self) -> (u32, u32, u32, u32) {
+        self.clip_rect
+    }
+}
+../crates/pixpox_renderer/src/renderer.rs end
+../crates/pixpox_renderer/src/shaders/scale.wgsl begin
+// Vertex shader bindings
+
+struct VertexOutput {
+    @location(0) tex_coord: vec2<f32>,
+    @builtin(position) position: vec4<f32>,
+}
+
+struct Locals {
+    transform: mat4x4<f32>,
+}
+@group(0) @binding(2) var<uniform> r_locals: Locals;
+
+@vertex
+fn vs_main(
+    @location(0) position: vec2<f32>,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.tex_coord = fma(position, vec2<f32>(0.5, -0.5), vec2<f32>(0.5, 0.5));
+    out.position = r_locals.transform * vec4<f32>(position, 0.0, 1.0);
+    return out;
+}
+
+// Fragment shader bindings
+
+@group(0) @binding(0) var r_tex_color: texture_2d<f32>;
+@group(0) @binding(1) var r_tex_sampler: sampler;
+
+@fragment
+fn fs_main(@location(0) tex_coord: vec2<f32>) -> @location(0) vec4<f32> {
+    return textureSample(r_tex_color, r_tex_sampler, tex_coord);
+}
+
+../crates/pixpox_renderer/src/shaders/scale.wgsl end
+../crates/pixpox_renderer/src/shaders/shader.wgsl begin
+// Vertex shader
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) color: vec3<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
+
+
+@vertex
+fn vs_main(
+    model: VertexInput,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.color = model.color;
+    out.clip_position = vec4<f32>(model.position, 1.0);
+    return out;
+}
+
+
+// Fragment shader
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.color, 1.0);
+}
+
+ 
+../crates/pixpox_renderer/src/shaders/shader.wgsl end
+../crates/pixpox_utils/Cargo.toml begin
+[package]
+name = "pixpox_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = "0.4.17"
+rand = "0.8.5"
+rayon = "1.6.1"
+winit = "0.27"
+winit_input_helper = "0.13.0"
+../crates/pixpox_utils/Cargo.toml end
+../crates/pixpox_utils/src/lib.rs begin
+pub mod stats;
+pub use stats::Stats;
+
+pub mod CA;
+pub use CA::conway;
+pub use CA::cell_realm;
+pub use CA::letters;
+use winit_input_helper::WinitInputHelper;
+use winit::event::{VirtualKeyCode, Event};
+
+/// A macro similar to `vec![$elem; $size]` which returns a boxed array.
+///
+/// ```rustc
+///     let _: Box<[u8; 1024]> = box_array![0; 1024];
+/// ```
+#[macro_export]
+macro_rules! box_array {
+    ($val:expr ; $len:expr) => {{
+        // Use a generic function so that the pointer cast remains type-safe
+        fn vec_to_boxed_array<T>(vec: Vec<T>) -> Box<[T; $len]> {
+            let boxed_slice = vec.into_boxed_slice();
+
+            let ptr = ::std::boxed::Box::into_raw(boxed_slice) as *mut [T; $len];
+
+            unsafe { Box::from_raw(ptr) }
+        }
+
+        vec_to_boxed_array(vec![$val; $len])
+    }};
+}
+
+pub fn map_range(from_range: (f64, f64), to_range: (f64, f64), s: f64) -> f64 {
+    to_range.0 + (s - from_range.0) * (to_range.1 - to_range.0) / (from_range.1 - from_range.0)
+}
+
+pub struct InputHandler {
+    pub winit: WinitInputHelper,
+    pub mouse: (isize, isize),
+    pub mouse_prev: (isize, isize),
+    pub scale: f32,
+}
+
+impl InputHandler {
+    pub fn new() -> Self {
+        Self {
+            winit: WinitInputHelper::new(),
+            mouse: (0, 0),
+            mouse_prev: (0, 0),
+            scale: 1.0
+        }
+    }
+
+    pub fn update(&mut self, event: &Event<()>, mouse_pos: (isize, isize), prev_mouse_pos: (isize, isize)) {
+        self.winit.update(event);
+        self.mouse = mouse_pos;
+        self.mouse_prev = prev_mouse_pos;
+    }
+
+    pub fn update_scale (&mut self, scale: f32) {
+        self.scale = scale;
+    }
+
+    // Calculate mousepos based on scale
+    pub fn get_mouse_pos(&self) -> (isize, isize) {
+        (self.mouse.0 / self.scale as isize, self.mouse.1 / self.scale as isize)
+    }
+}
+../crates/pixpox_utils/src/lib.rs end
+../crates/pixpox_utils/src/stats.rs begin
+use std::{time::{self, Instant}, collections::HashMap, fmt::format};
+
+pub struct Stats {
+    last_update: time::Instant,
+    fps: f32,
+    acc: Vec<f32>,
+    sectors: HashMap<&'static str, f32>
+}
+
+impl Stats {
+    pub fn new() -> Self {
+        Self {
+            last_update: Instant::now(),
+            fps: 0.0,
+            acc: Vec::with_capacity(100000),
+            sectors: HashMap::new()
+        }
+    }
+
+    pub fn new_tick(&mut self) {
+        let curr_diff = Instant::now() - self.last_update;
+
+        self.fps = 1.0 / curr_diff.as_secs_f32();
+        self.acc.push(self.fps);
+        self.last_update = Instant::now();
+    }
+
+    pub fn get_fps(&self) -> f32 {
+        self.fps
+    }
+
+    pub fn get_fps_as_string(&self) -> String {
+        self.fps.to_string()
+    }
+
+    pub fn get_average_fps(&self) -> f32 {
+        self.acc.iter().sum::<f32>() as f32 / self.acc.len() as f32
+    }
+
+    pub fn get_mean_fps(&self) -> f32 {
+        // self.acc.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // self.acc[self.acc.len() / 2]
+        0.0
+    }
+
+    pub fn update_sector(&mut self, label: &'static str, value: f32) {
+        self.sectors.insert(label, value);
+    }
+
+    pub fn get_formatted_stats(&self) -> Vec<String> {
+        let mut ret = Vec::new();
+
+        ret.push("fps: ".to_owned() + &self.get_fps().to_string());
+        ret.push("avg fps: ".to_owned() + &self.get_average_fps().to_string());
+        ret.push("mean fps: ".to_owned() + &self.get_mean_fps().to_string());
+    
+        for (k, v) in self.sectors.iter() {
+            let s = format!("{}: {}", k, v);
+            ret.push(s);
+        };
+
+        ret
+    }
+}
+
+../crates/pixpox_utils/src/stats.rs end
+../crates/pixpox_utils/src/CA/letters.rs begin
+/// This file contains helper functions used to write letters to the cell grid
+/// Used in the presentation demo
+
+pub fn draw_p(cells: &mut Vec<bool>, width: usize, start_x: usize, start_y: usize) {
+    let p: [[bool; 3]; 5] = [
+        [true, true, false],
+        [true, false, true],
+        [true, true, false],
+        [true, false, false],
+        [true, false, false],
+    ];
+
+    for y in 0..5 {
+        for x in 0..3 {
+            cells[((start_y + y) * width + (start_x + x)) as usize] = p[y][x];
+        }
+    }
+}
+
+pub fn draw_i(cells: &mut Vec<bool>, width: usize, start_x: usize, start_y: usize) {
+    let i: [[bool; 3]; 5] = [
+        [false, true, false],
+        [false, true, false],
+        [false, true, false],
+        [false, true, false],
+        [false, true, false],
+    ];
+
+    for y in 0..5 {
+        for x in 0..3 {
+            cells[((start_y + y) * width + (start_x + x)) as usize] = i[y][x];
+        }
+    }
+}
+
+pub fn draw_o(cells: &mut Vec<bool>, width: usize, start_x: usize, start_y: usize) {
+    let o: [[bool; 3]; 5] = [
+        [true, true, true],
+        [true, false, true],
+        [true, false, true],
+        [true, false, true],
+        [true, true, true],
+    ];
+
+    for y in 0..5 {
+        for x in 0..3 {
+            cells[((start_y + y) * width + (start_x + x)) as usize] = o[y][x];
+        }
+    }
+}
+
+
+pub fn draw_x(cells: &mut Vec<bool>, width: usize, start_x: usize, start_y: usize) {
+    let lx: [[bool; 3]; 5] = [
+        [true, false, true],
+        [false, true, false],
+        [false, true, false],
+        [false, true, false],
+        [true, false, true],
+    ];
+
+    for y in 0..5 {
+        for x in 0..3 {
+            cells[((start_y + y) * width + (start_x + x)) as usize] = lx[y][x];
+        }
+    }
+}
+
+../crates/pixpox_utils/src/CA/letters.rs end
+../crates/pixpox_utils/src/CA/cell_realm.rs begin
+#[derive(Copy, Clone, PartialEq)]
+pub enum Cell {
+    EMPTY,
+    SAND,
+    WATER,
+    SOLID,
+}
+
+impl Cell {
+    pub fn get_color(&self) -> [u8; 4] {
+        match self {
+            Cell::EMPTY => [0, 0, 0, 0],
+            Cell::SAND => [255, 255, 0, 255],
+            Cell::WATER => [0, 0, 255, 255],
+            Cell::SOLID => [255, 255, 255, 255],
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CellRealm {
+    height: u32,
+    width: u32,
+    cells: Vec<Cell>,
+}
+
+impl CellRealm {
+    pub fn new(height: u32, width: u32) -> Self {
+        let mut cells: Vec<Cell> = Vec::new();
+
+        for _ in 0..height {
+            for _ in 0..width {
+                cells.push(Cell::EMPTY);
+            }
+        }
+
+        Self {
+            cells,
+            width: width,
+            height: height,
+        }
+    }
+
+    /// Private function to map between real pos and idx
+    fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.width as isize + pos.0;
+        idx as usize
+    }
+
+    // Private function to map idx to real pos
+    fn get_pos(&self, idx: isize) -> (isize, isize) {
+        let x = idx % self.width as isize;
+        let y = idx / self.width as isize;
+
+        (x, y)
+    }
+
+    pub fn set_pos(&mut self, pos: (isize, isize), cell: Cell) {
+        let idx = self.get_idx(pos);
+        self.cells[idx] = cell;
+    }
+
+    /// Implement Bresenham's line algorithm
+    pub fn set_line(&mut self, pos1: (isize, isize), pos2: (isize, isize), cell: Cell) {
+        let (x1, y1) = pos1;
+        let (x2, y2) = pos2;
+
+        let dx = (x2 - x1).abs();
+        let dy = (y2 - y1).abs();
+        let sx = if x1 < x2 { 1 } else { -1 };
+        let sy = if y1 < y2 { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        let mut x = x1;
+        let mut y = y1;
+
+        while x != x2 || y != y2 {
+            self.set_pos((x, y), cell.clone());
+
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err -= dy;
+                x += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    // Circle paint brush
+    pub fn set_circle(&mut self, center: (isize, isize), radius: isize, cell: Cell) {
+        let (cx, cy) = center;
+        let r_squared = radius * radius;
+
+        for y in (cy - radius)..=(cy + radius) {
+            for x in (cx - radius)..=(cx + radius) {
+                let dx = x - cx;
+                let dy = y - cy;
+                let distance_squared = dx * dx + dy * dy;
+
+                if distance_squared <= r_squared {
+                    self.set_pos((x, y), cell.clone());
+                }
+            }
+        }
+    }
+
+    pub fn clear_grid(&mut self) {
+        self.cells = self.cells.iter().map(|_| Cell::EMPTY).collect();
+    }
+
+    fn update_next(
+        &self,
+        x: isize,
+        y: isize,
+        next_x: isize,
+        next_y: isize,
+        next_cell: Cell,
+        next_positions: &mut Vec<(isize, isize)>,
+        next_states: &mut Vec<Cell>,
+    ) {
+        let idx = self.get_idx((x, y));
+        next_positions[idx] = (next_x, next_y);
+        next_states[idx] = next_cell;
+    }
+
+    fn is_valid_pos(&self, x: isize, y: isize) -> bool {
+        x >= 0 && y >= 0 && x < self.width as isize && y < self.height as isize
+    }
+
+    fn next_state_cell(
+        &mut self,
+        x: isize,
+        y: isize,
+        cell: Cell,
+        next_positions: &mut Vec<(isize, isize)>,
+        next_states: &mut Vec<Cell>,
+    ) {
+        match cell {
+            Cell::SAND => {
+                let dirs = [(0, 1), (-1, 1), (1, 1)]; //down, left-down, right-down
+                for (dx, dy) in dirs.iter() {
+                    let next_x = x + dx;
+                    let next_y = y + dy;
+                    if self.is_valid_pos(next_x, next_y)
+                        && (self.cells[self.get_idx((next_x, next_y))] == Cell::EMPTY
+                            || self.cells[self.get_idx((next_x, next_y))] == Cell::WATER)
+                    {
+                        if self.cells[self.get_idx((next_x, next_y))] == Cell::WATER {
+                            self.update_next(x, y, x, y, Cell::WATER, next_positions, next_states);
+                        }
+                        self.update_next(
+                            x,
+                            y,
+                            next_x,
+                            next_y,
+                            Cell::SAND,
+                            next_positions,
+                            next_states,
+                        );
+                        return;
+                    }
+                }
+                // If no suitable spot was found, remain in the same position
+                self.update_next(x, y, x, y, Cell::SAND, next_positions, next_states);
+            },
+
+            Cell::WATER => {
+                let dirs = [(0, 1), (-1, 1), (1, 1), (-1, 0), (1, 0)]; //down, left-down, right-down, left, right
+                for (dx, dy) in dirs.iter() {
+                    let next_x = x + dx;
+                    let next_y = y + dy;
+                    if self.is_valid_pos(next_x, next_y)
+                        && self.cells[self.get_idx((next_x, next_y))] == Cell::EMPTY
+                    {
+                        self.update_next(
+                            x,
+                            y,
+                            next_x,
+                            next_y,
+                            Cell::WATER,
+                            next_positions,
+                            next_states,
+                        );
+                        return;
+                    }
+                }
+                // If no suitable spot was found, remain in the same position
+                self.update_next(x, y, x, y, Cell::WATER, next_positions, next_states);
+            },
+            _ => {
+                // For any other cell type, it stays in the same position and state
+                self.update_next(x, y, x, y, cell, next_positions, next_states);
+            },
+        }
+    }
+
+    /// Updates the cells vec to the next logical state
+    pub fn next_state(&mut self) {
+        let mut cells_next: Vec<Cell> = vec![Cell::EMPTY; self.cells.len()];
+        let mut next_positions: Vec<(isize, isize)> = vec![(0, 0); self.cells.len()];
+        let mut next_states: Vec<Cell> = self.cells.clone();
+
+        for y in (0..self.height as isize).rev() {
+            for x in (0..self.width as isize).rev() {
+                let cell = self.cells[self.get_idx((x, y))];
+                self.next_state_cell(x, y, cell, &mut next_positions, &mut next_states);
+            }
+        }
+
+        for idx in 0..self.cells.len() {
+            let next_pos = next_positions[idx];
+            let next_idx = self.get_idx(next_pos);
+            if cells_next[next_idx] == Cell::EMPTY {
+                cells_next[next_idx] = next_states[idx];
+            }
+        }
+
+        self.cells = cells_next;
+    }
+
+    pub fn get_color_vec(&mut self) -> Vec<[u8; 4]> {
+        self.cells.iter().map(|cell| cell.get_color()).collect()
+    }
+}
+
+../crates/pixpox_utils/src/CA/cell_realm.rs end
+../crates/pixpox_utils/src/CA/rules.rs begin
+pub struct Rules {
+
+}
+
+impl Rules {
+
+}
+../crates/pixpox_utils/src/CA/rules.rs end
+../crates/pixpox_utils/src/CA/mod.rs begin
+pub mod conway;
+pub mod cell_realm;
+pub mod letters;
+../crates/pixpox_utils/src/CA/mod.rs end
+../crates/pixpox_utils/src/CA/conway.rs begin
+use crate::letters;
+use log::{debug, error};
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
+use std::collections::HashMap;
+
+#[derive(Clone)]
+pub struct ConwayGrid {
+    height: u32,      // real height
+    width: u32,       // real width
+    cells: Vec<bool>, // real cells
+}
+
+impl ConwayGrid {
+    pub fn new(height: u32, width: u32, gen_chance: f64) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut cells: Vec<bool> = Vec::new();
+
+        for _ in 0..height {
+            for _ in 0..width {
+                let alive = rng.gen_bool(gen_chance);
+                cells.push(alive);
+            }
+        }
+
+        Self {
+            cells,
+            width: width,
+            height: height,
+        }
+    }
+
+    pub fn new_pixpox(height: u32, width: u32, gen_chance: f64) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut cells: Vec<bool> = vec![false; (height * width) as usize];
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut alive = rng.gen_bool(gen_chance);
+
+                if x > 100 && x < 200 {
+                    if y > 70 && y < 140 {
+                        alive = false;
+                    }
+                }
+
+                let idx = (y * width) + x;
+                cells[idx as usize] = alive;
+            }
+        }
+
+        // Calculate the starting position for the first letter ('P') to center "PIXPOX"
+        let pixpox_width = 5 * 6 + 1 * 5; // Each letter is 5 cells wide, and there are 5 gaps between the letters
+        let pixpox_height = 5; // Each letter is 5 cells tall
+        let start_x = (width - pixpox_width) / 2;
+        let start_y = (height - pixpox_height) / 2;
+
+        // Draw "PIXPOX" in the middle
+        letters::draw_p(
+            &mut cells,
+            width as usize,
+            start_x as usize,
+            start_y as usize,
+        );
+        letters::draw_i(
+            &mut cells,
+            width as usize,
+            (start_x + 6) as usize,
+            start_y as usize,
+        );
+        letters::draw_x(
+            &mut cells,
+            width as usize,
+            (start_x + 12) as usize,
+            start_y as usize,
+        );
+        letters::draw_p(
+            &mut cells,
+            width as usize,
+            (start_x + 18) as usize,
+            start_y as usize,
+        );
+        letters::draw_o(
+            &mut cells,
+            width as usize,
+            (start_x + 24) as usize,
+            start_y as usize,
+        );
+        letters::draw_x(
+            &mut cells,
+            width as usize,
+            (start_x + 30) as usize,
+            start_y as usize,
+        );
+
+        Self {
+            cells,
+            width: width,
+            height: height,
+        }
+    }
+
+    /// Private function to map between real pos and idx
+    fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.width as isize + pos.0;
+        idx as usize
+    }
+
+    // Private function to map idx to real pos
+    fn get_pos(&self, idx: isize) -> (isize, isize) {
+        let x = idx % self.width as isize;
+        let y = idx / self.width as isize;
+
+        (x, y)
+    }
+
+    pub fn clear_grid(&mut self) {
+        self.cells = self.cells.iter().map(|_| false).collect();
+    }
+
+    pub fn set_cell(&mut self, pos: (isize, isize), state: bool) {
+        let idx = self.get_idx(pos);
+        self.cells[idx] = state;
+    }
+
+    pub fn count_neibs(&self, pos: (isize, isize)) -> usize {
+        if pos.0 == 0
+            || pos.0 == self.width as isize - 1
+            || pos.1 == 0
+            || pos.1 == self.height as isize - 1
+        {
+            return 0;
+        }
+
+        self.cells[self.get_idx((pos.0 - 1, pos.1 - 1))] as usize
+            + self.cells[self.get_idx((pos.0 - 1, pos.1))] as usize
+            + self.cells[self.get_idx((pos.0 - 1, pos.1 + 1))] as usize
+            + self.cells[self.get_idx((pos.0, pos.1 - 1))] as usize
+            + self.cells[self.get_idx((pos.0, pos.1 + 1))] as usize
+            + self.cells[self.get_idx((pos.0 + 1, pos.1 - 1))] as usize
+            + self.cells[self.get_idx((pos.0 + 1, pos.1))] as usize
+            + self.cells[self.get_idx((pos.0 + 1, pos.1 + 1))] as usize
+    }
+
+    /// Set pos
+    pub fn set_pos(&mut self, pos: (isize, isize), cell: bool) {
+        let idx = self.get_idx(pos);
+        self.cells[idx] = cell;
+    }
+
+    /// Implement Bresenham's line algorithm
+    pub fn set_line(&mut self, pos1: (isize, isize), pos2: (isize, isize), cell: bool) {
+        let (x1, y1) = pos1;
+        let (x2, y2) = pos2;
+
+        let dx = (x2 - x1).abs();
+        let dy = (y2 - y1).abs();
+        let sx = if x1 < x2 { 1 } else { -1 };
+        let sy = if y1 < y2 { 1 } else { -1 };
+        let mut err = dx - dy;
+
+        let mut x = x1;
+        let mut y = y1;
+
+        while x != x2 || y != y2 {
+            self.set_pos((x, y), cell.clone());
+
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err -= dy;
+                x += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// Updates the cells vec to the next logical state
+    pub fn next_state(&mut self) {
+        let mut cells_next: Vec<bool> = Vec::with_capacity(self.cells.len());
+
+        self.cells
+            .par_iter()
+            .enumerate()
+            .map(|(index, state)| {
+                let pos = self.get_pos(index as isize);
+                let neibs = self.count_neibs(pos);
+
+                let new_state = if *state {
+                    neibs == 2 || neibs == 3
+                } else {
+                    neibs == 3
+                };
+
+                new_state
+            })
+            .collect_into_vec(&mut cells_next);
+
+        // self.cells = cells_next;
+        std::mem::swap(&mut self.cells, &mut cells_next);
+    }
+
+    pub fn get_color_vec(&mut self) -> Vec<[u8; 4]> {
+        self.cells
+            .iter()
+            .map(|state| {
+                if *state {
+                    [0, 0, 200, 255]
+                } else {
+                    [0, 0, 0, 255]
+                }
+            })
+            .collect()
+    }
+}
+
+../crates/pixpox_utils/src/CA/conway.rs end
+../crates/pixpox_common/Cargo.toml begin
+[package]
+name = "pixpox_common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+../crates/pixpox_common/Cargo.toml end
+../crates/pixpox_common/src/camera.rs begin
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone)]
+pub struct Camera {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    max_width: u32,
+    max_height: u32,
+    min_width: u32,
+    min_height: u32,
+    aspect_ratio: f32,
+}
+
+impl Camera {
+    pub fn new(x: u32, y: u32, height: u32, width: u32, max_height: u32, max_width: u32) -> Self {
+        let aspect_ratio = width as f32 / height as f32;
+
+        Self {
+            x,
+            y,
+            width,
+            height,
+            max_height,
+            max_width,
+            min_width: (10 as f32 * aspect_ratio) as u32,
+            min_height: 10,
+            aspect_ratio,
+        }
+    }
+
+    fn move_origin(&mut self, x: i32, y: i32) {
+        self.x = (self.x as i32 + x).clamp(0, (self.max_width - self.width) as i32) as u32;
+        self.y = (self.y as i32 + y).clamp(0, (self.max_height - self.height) as i32) as u32;
+    }
+
+    pub fn zoom(&mut self, scale: f32) {
+        let old_center_x = self.x + self.width / 2;
+        let old_center_y = self.y + self.height / 2;
+
+        let mut new_width = (self.width as f32 * scale) as u32;
+        let mut new_height = (self.height as f32 * scale) as u32;
+
+        // Correct aspect ratio
+        if new_width as f32 / new_height as f32 > self.aspect_ratio {
+            new_width = (new_height as f32 * self.aspect_ratio) as u32;
+        } else {
+            new_height = (new_width as f32 / self.aspect_ratio) as u32;
+        }
+
+        // Keep width and height in bounds (also keeping original aspect ratio)
+        self.width = new_width.clamp(self.min_width, self.max_width);
+        self.height = new_height.clamp(self.min_height, self.max_height);
+
+        let new_origin_x = old_center_x as i32 - self.width as i32 / 2;
+        let new_origin_y = old_center_y as i32 - self.height as i32 / 2;
+
+        self.move_origin(new_origin_x - self.x as i32, new_origin_y - self.y as i32);
+    }
+
+    // move function with direction
+    pub fn move_direction(&mut self, direction: Direction) {
+        // calculate movement speed based on camera scale
+        let speed = (1.0 * self.get_scale()).ceil() as i32;
+
+        match direction {
+            Direction::Up => self.move_origin(0, -speed),
+            Direction::Down => self.move_origin(0, speed),
+            Direction::Left => self.move_origin(-speed, 0),
+            Direction::Right => self.move_origin(speed, 0),
+        }
+    }
+
+    // move function with delta
+    pub fn move_delta(&mut self, delta: (i32, i32)) {
+        self.move_origin(delta.0, delta.1);
+    }
+
+    // getters
+    pub fn get_x(&self) -> u32 {
+        self.x
+    }
+
+    pub fn get_y(&self) -> u32 {
+        self.y
+    }
+
+    pub fn get_width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn get_height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn get_dim(&mut self) -> (u32, u32) {
+        (0, 0)
+    }
+
+    pub fn get_scale(&self) -> f32 {
+        self.width as f32 / self.max_width as f32
+    }
+}
+
+../crates/pixpox_common/src/camera.rs end
+../crates/pixpox_common/src/lib.rs begin
+pub mod camera;
+
+pub use camera::{Camera, Direction};
+../crates/pixpox_common/src/lib.rs end
+../crates/pixpox_ecs/Cargo.toml begin
+[package]
+name = "pixpox_ecs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winit = "0.27"
+queues = "1.0.2"
+bit-set = "0.5.3"
+bit-vec = "0.6.3"
+env_logger = "0.9"
+log = "0.4"
+ticktock = "0.8.0"
+string-interner = "0.14.0"
+rayon = "1.6.1"
+winit_input_helper = "0.13.0"
+arc-interner = "0.7.0"
+lasso = { version = "0.6.0", features = ["multi-threaded"] }
+
+# Local Crates
+pixpox_utils = { path = "../pixpox_utils" }
+pixpox_common = { path = "../pixpox_common" }
+../crates/pixpox_ecs/Cargo.toml end
+../crates/pixpox_ecs/src/world.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+use core::panic;
+use std::{
+    any::{self, Any},
+    borrow::BorrowMut,
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
+    },
+    thread,
+    time::{self, Duration, Instant},
+};
+
+use log::{debug, error, info};
+use pixpox_utils::stats::Stats;
+use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use winit::event::{Event, VirtualKeyCode};
+use winit_input_helper::WinitInputHelper;
+
+use pixpox_utils::InputHandler;
+
+use crate::{
+    component::{self},
+    entity::{Entity, EntityManager},
+    Label, Run, Storage, Texture, Update,
+};
+
+use ticktock::{Clock, Timer};
+
+static MAX_WORLD_ID: AtomicUsize = AtomicUsize::new(0);
+
+struct WorldId(usize);
+
+impl WorldId {
+    pub fn new() -> Option<Self> {
+        MAX_WORLD_ID
+            // We use `Relaxed` here since this atomic only needs to be consistent with itself
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                val.checked_add(1)
+            })
+            .map(WorldId)
+            .ok()
+    }
+}
+
+fn print_type_of<T>(_: &T) {
+    println!("{}", std::any::type_name::<T>())
+}
+
+pub enum BucketAction {
+    GET,
+    PUT,
+}
+
+// TODO: Add a field for tick speed
+pub struct World {
+    id: WorldId,
+    pub entities: EntityManager,
+    pub component_vecs: Vec<Box<dyn ComponentVec>>,
+    pub storage: RwLock<Storage>,
+    pub last_update: time::Instant,
+    pub stats: Stats,
+    pub input: InputHandler,
+    paused: bool,
+}
+
+impl World {
+    pub fn new() -> Self {
+        let entities = EntityManager::new();
+        let component_vecs = Vec::new();
+
+        // show some fps measurements every 5 seconds
+        let fps = Timer::apply(|delta_t, prev_tick| (delta_t, *prev_tick), 0)
+            .every(time::Duration::from_secs(5))
+            .start(time::Instant::now());
+
+        print_type_of(&fps);
+
+        Self {
+            id: WorldId::new()
+                .expect("More PixPox worlds have been created than currently supported."),
+            entities,
+            component_vecs,
+            last_update: time::Instant::now(),
+            storage: RwLock::new(Storage::new()),
+            stats: Stats::new(),
+            input: InputHandler::new(),
+            paused: false,
+        }
+    }
+
+    pub fn spawn(&mut self) -> Entity {
+        self.new_entity()
+    }
+
+    pub fn add_component_to_entity<
+        ComponentType: 'static + Label + Run + Update + Clone + Send + Sync,
+    >(
+        &mut self,
+        entity: Entity,
+        mut component: ComponentType,
+    ) {
+        let now = Instant::now();
+        // Search for any existing ComponentVecs that match the type of the component being added.
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec
+                .as_any_mut()
+                .downcast_mut::<Vec<Option<ComponentType>>>()
+            {
+                component_vec[entity.id as usize] = Some(component);
+
+                debug!(
+                    "World::add_component_to_entity() existing component_vec: {} micros",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                return;
+            }
+        }
+
+        // No matching component storage exists yet, so we have to make one.
+        let mut new_component_vec: Vec<Option<ComponentType>> =
+            Vec::with_capacity(self.entities.living_entity_count);
+
+        // All existing entities don't have this component, so we give them `None`
+        for _ in 0..self.entities.living_entity_count {
+            new_component_vec.push(None);
+        }
+
+        let label = component.label();
+        // Give this Entity the Component.
+        new_component_vec[entity.id as usize] = Some(component);
+        self.component_vecs.push(Box::new(new_component_vec));
+
+        debug!(
+            "World::add_component_to_entity() - Added component: {} to entity: {} in {} micros",
+            label,
+            entity.id,
+            now.elapsed().as_micros().to_string()
+        );
+    }
+
+    pub fn query_components<T: 'static>(&mut self, entities: Vec<&Entity>) -> Option<Vec<&T>> {
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec.as_any_mut().downcast_mut::<Vec<Option<T>>>()
+            {
+                debug!(
+                    "World::query_components() in {}",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                let res = entities
+                    .iter()
+                    .filter_map(|entity| {
+                        component_vec
+                            .get(entity.id)
+                            .expect("Entity could not be found in vec")
+                            .as_ref()
+                    })
+                    .collect::<Vec<&T>>();
+
+                return Some(res);
+            }
+        }
+
+        return None;
+    }
+
+    pub fn query_components_for_render<T: 'static + Texture>(&mut self) -> Option<Vec<&T>> {
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec.as_any_mut().downcast_mut::<Vec<Option<T>>>()
+            {
+                debug!(
+                    "World::query_entities_for_render() in {}",
+                    now.elapsed().as_micros().to_string()
+                );
+
+                let res = component_vec
+                    .iter_mut()
+                    .filter_map(|x| x.as_ref())
+                    .collect::<Vec<&T>>();
+
+                return Some(res);
+            }
+        }
+
+        return None;
+    }
+
+    pub fn toggle_paused(&mut self) {
+        self.paused = !self.paused;
+    }
+
+    pub fn handle_input(&mut self) {
+        /*
+        if self.input.key_pressed(VirtualKeyCode::P) {
+            info!("Toggled world");
+            self.toggle_paused();
+        }
+         */
+    }
+
+    pub fn run<T: 'static + Texture>(&mut self) {
+        self.stats.new_tick();
+
+        if self.paused {
+            return;
+        }
+
+        self.handle_input();
+
+        let now = Instant::now();
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.run_all(&mut self.storage);
+        }
+        let elapsed = Instant::now() - now;
+        self.stats.update_sector("run()", elapsed.as_secs_f32());
+
+        let now = Instant::now();
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.update_all(&mut self.storage, &mut self.input);
+        }
+        let mut storage = self.storage.write().expect("Could not lock storage");
+        storage.update_global_pixel_map::<T>(&self.input);
+
+        let elapsed = Instant::now() - now;
+        self.stats.update_sector("update()", elapsed.as_secs_f32());
+    }
+
+    fn new_entity(&mut self) -> Entity {
+        let entity = self.entities.create();
+        let now = Instant::now();
+
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.push_none();
+        }
+
+        debug!(
+            "World::new_entity(): {} micros",
+            now.elapsed().as_micros().to_string()
+        );
+
+        return entity;
+    }
+
+    fn spawn_random_terrain() {}
+
+    fn serialize() {}
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait ComponentVec: Send + Sync {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync);
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
+    fn push_none(&mut self);
+    fn run_all(&mut self, storage: &RwLock<Storage>);
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler);
+}
+
+impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync) {
+        self as &(dyn std::any::Any + Send + Sync)
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync) {
+        self as &mut (dyn std::any::Any + Send + Sync)
+    }
+
+    fn push_none(&mut self) {
+        self.push(None)
+    }
+
+    fn run_all(&mut self, storage: &RwLock<Storage>) {
+        self.par_iter_mut().for_each(|component| {
+            if let Some(c) = component {
+                c.run(&storage.read().unwrap());
+            }
+        })
+    }
+
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler) {
+        self.par_iter_mut().for_each(|component| {
+            if let Some(c) = component {
+                c.update(&storage, input);
+            }
+        })
+    }
+}
+
+../crates/pixpox_ecs/src/world.rs end
+../crates/pixpox_ecs/src/archetypes.rs begin
+
+../crates/pixpox_ecs/src/archetypes.rs end
+../crates/pixpox_ecs/src/lib.rs begin
+pub mod entity;
+
+pub mod world;
+pub mod component;
+pub mod storage;
+
+pub use world::*;
+pub use component::*;
+pub use storage::*;
+
+../crates/pixpox_ecs/src/lib.rs end
+../crates/pixpox_ecs/src/component.rs begin
+use std::sync::RwLock;
+
+use crate::{Storage};
+use pixpox_utils::InputHandler;
+use pixpox_common::Camera;
+
+/// The Label trait is used to give a human-readable label to an ECS component.
+/// Every component must implement this trait in order to be used with the PixPox game engine.
+/// 
+/// ### Example
+///
+/// ```
+/// struct Cell {
+///     label: &'static str,
+/// }
+///
+/// impl Label for Cell {
+///    fn label(&mut self) -> &'static str {
+///       return self.label;
+///     }
+/// }
+/// ```
+pub trait Label {
+    fn label(&mut self) -> &'static str;
+}
+
+
+/// The `Run` trait specifies a `run()` method that is executed for each component 
+/// whenever `world.run()` is called. This function is parallelized using multi-threading 
+/// and only has read access to the storage. It is designed for heavy computation, and no 
+/// updates are allowed.
+/// 
+/// ### Example
+///
+/// ```
+/// struct Cell {
+///     label: &'static str,
+/// }
+///
+/// impl Run for Cell {
+///     fn run(&mut self, storage: &Storage) {
+///         let grid = storage
+///             .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid")
+///             .expect("Could not query storage: grid");
+///     }
+/// }
+///
+/// ```
+pub trait Run {
+    fn run(&mut self, storage: &Storage);
+}
+
+/// The `Update` trait specifies an `update()` method, which much like `run()`  is 
+/// executed on every pass of `world.run()`. It is also parallelized, but its given a 
+/// `RwLock` instead of an immutable reference. This method is meant to update the 
+/// world when a change is present, and it should not attempt to obtain a `.write()` lock 
+/// on the storage when no changes are present, as doing so would adversely impact performance.
+/// 
+/// ### Example
+///
+/// ```
+/// struct Cell {
+///     label: &'static str,
+/// }
+///
+/// impl Update for Cell {
+///     fn update(&mut self, storage: &RwLock<Storage>) {
+///         let mut storage = storage.write().unwrap();
+///     }
+/// }
+/// ```
+pub trait Update {
+    fn update(&mut self, storage: &RwLock<Storage>, input: &InputHandler);
+}
+
+/// The Texture trait defines how a component should be rendered.
+/// The `render()` method is responsible for rendering the texture, given a `pixels` buffer as an argument, 
+/// and the `size()` method returns the size of the texture.
+///
+/// ### Example
+/// ```
+/// impl Texture for GlobalPixelMap {
+///     fn render(&self, pixels: &mut [u8]) {
+///         debug!("Rendering GlobalPixelMap");
+///         for (c, pix) in self.pixelmap
+///             .iter()
+///             .zip(pixels.chunks_exact_mut(4)) {
+///                 pix.copy_from_slice(c);
+///         }
+///     }
+///
+///     fn size(&self) -> (u32, u32) {
+///         return (self.width, self.height);
+///     }
+/// }
+/// ```
+pub trait Texture {
+    fn render(&self, pixels: &mut [u8]);
+    fn update(&mut self, input: &InputHandler);
+    fn size(&self) -> (u32, u32);
+    fn get_camera(&self) -> Camera;
+}
+
+
+
+/// TODO: Add docs for GlobalPixelMap trait
+pub trait GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]);
+    fn update(&mut self, input: &InputHandler);
+    fn size(&self) -> (u32, u32);
+    fn get_camera(&self) -> Camera;
+}
+../crates/pixpox_ecs/src/component.rs end
+../crates/pixpox_ecs/src/entity.rs begin
+use std::time::Instant;
+
+// max entities should be the size of the largest possible u32 value
+// const MAX_ENTITIES: usize = std::usize::MAX;
+
+use log::{debug, error, info, warn};
+
+#[derive(Debug, Clone, Copy)]
+pub struct Entity {
+    pub id: usize,
+}
+
+pub struct EntityManager {
+    pub id_counter: usize,
+    pub living_entity_count: usize, // number of living entities
+}
+
+impl EntityManager {
+    pub fn new() -> Self {
+
+        Self {
+            id_counter: 0,
+            living_entity_count: 0,
+        }
+    }
+
+    pub fn create(&mut self) -> Entity {
+        let now = Instant::now();
+
+        let id = self.id_counter;
+        self.id_counter += 1;
+        self.living_entity_count += 1;
+
+        debug!(
+            "EntityManager::create() - id: {}, living_entity_count: {}, in {} micros",
+            id, self.living_entity_count,
+            now.elapsed().as_micros().to_string()
+        );
+
+        Entity { id }
+    }
+
+    pub fn destroy(&mut self, entity: Entity) {
+        self.living_entity_count -= 1;
+
+        debug!(
+            "EntityManager::destroy() - id: {}, living_entity_count: {}",
+            entity.id, self.living_entity_count
+        );
+    }
+}
+
+../crates/pixpox_ecs/src/entity.rs end
+../crates/pixpox_ecs/src/storage.rs begin
+use lasso::{Spur, ThreadedRodeo};
+
+use std::{
+    any::Any,
+    collections::{HashMap},
+};
+
+use crate::{Texture};
+pub use pixpox_utils::InputHandler;
+
+pub enum BucketAction {
+    GET,
+    PUT,
+}
+
+/// # Storage
+///
+/// Storage is a data structure designed to store global data accessible to all components.
+///
+/// It introduces a query system to create and retrieve buckets through a simple-to-use API.
+///
+/// To optimize bucket lookup, Storage implements a multi-threaded interner that efficiently stores bucket
+/// labels and associates them with Spurs. This interner facilitates fast and efficient hashmap lookup.
+///
+/// ## Example
+///
+/// ```
+/// let mut storage = app.world.storage.write().unwrap();
+///
+/// let (width, height) = (cfg.window_width, cfg.window_height);
+/// storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
+///
+/// let (width, height) = storage
+///     .query_storage::<HashMap<LogicalPosition<u32>, bool>>("grid-size")
+///     .expect("Could not query storage: grid-size");
+
+/// let mut (width, height) = storage
+///     .query_storage_mut::<HashMap<LogicalPosition<u32>, bool>>("grid-size")
+///     .expect("Could not query storage: grid-size");
+///
+/// ```
+///
+/// ## Panics
+///
+/// - If the bucket associated with the given label is not found, `query_storage()` and `query_storage_mut()`
+/// will panic with an error message.
+///
+/// - If the multi-threaded interner fails to recognize a string, `query_storage()` and `query_storage_mut()`
+/// will panic with an error message.
+///
+/// ## Safety
+///
+/// - The data stored in the `Storage` is not guaranteed to be thread-safe by default.
+/// If you need thread-safety, you can use a `RwLock` or a `Mutex` to synchronize access to the `Storage`.
+
+pub struct Storage {
+    pub buckets: HashMap<Spur, Box<dyn Any + Send + Sync>>,
+    interner: ThreadedRodeo,
+}
+
+impl Storage {
+    pub fn new() -> Self {
+        Self {
+            buckets: HashMap::new(),
+            interner: ThreadedRodeo::new(),
+        }
+    }
+
+    pub fn query_storage<T: 'static>(&self, label: &'static str) -> Option<&T> {
+        let key = &self
+            .interner
+            .get(label)
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::query_storage() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_ref::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn query_storage_mut<T: 'static>(&mut self, label: &'static str) -> Option<&mut T> {
+        let key = &self
+            .interner
+            .get(label)
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::query_storage_mut() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn query_global_pixel_map<T: 'static + Texture>(
+        &mut self,
+    ) -> Option<&mut T> {
+        let key = &self
+            .interner
+            .get("pixelmap")
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::query_global_pixel_map() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                return Some(downcasted);
+            }
+        }
+
+        None
+    }
+
+    pub fn update_global_pixel_map<T: 'static + Texture>(
+        &mut self, input: &InputHandler
+    ) {
+        let key = &self
+            .interner
+            .get("pixelmap")
+            .expect("String interner could not find a label");
+
+        assert!(
+            self.buckets.contains_key(key),
+            "World::update_global_pixel_map() didn't find an item you were looking for."
+        );
+
+        if let Some(data) = self.buckets.get_mut(key) {
+            // debug!("Storage::query_storage() - label found");
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                // debug!("Storage::query_storage() - value downcasted successfully");
+                downcasted.update(&input);
+            }
+        }
+    }
+
+    pub fn new_global_pixel_map<T: 'static + Texture + Send + Sync>(&mut self, pixelmap: T) {
+        let key = self.interner.get_or_intern("pixelmap");
+
+        self.buckets.insert(key, Box::new(pixelmap));
+    }
+
+    pub fn new_bucket<T: 'static + Send + Sync>(&mut self, label: &'static str, data: T) {
+        let key = self.interner.get_or_intern(label);
+
+        self.buckets.insert(key, Box::new(data));
+    }
+
+    pub fn new_hashmap_bucket<K: 'static + Send + Sync, V: 'static + Send + Sync>(
+        &mut self,
+        label: &'static str,
+        default: Option<HashMap<K, V>>,
+    ) {
+        let key = self.interner.get_or_intern(label);
+        let datastorage = Box::new(HashMap::<K, V>::new());
+
+        match default {
+            Some(map) => {
+                self.buckets.insert(key, Box::new(map));
+            },
+            None => {
+                self.buckets.insert(key, datastorage);
+            },
+        }
+    }
+}
+
+../crates/pixpox_ecs/src/storage.rs end
+../crates/pixpox_ecs/src/command.rs begin
+
+../crates/pixpox_ecs/src/command.rs end
+../examples/conway/AppConfig.toml begin
+window_title = "Conway"
+window_height = 200
+window_width = 300
+window_scale = 4.0
+window_fullscreen = false
+
+
+../examples/conway/AppConfig.toml end
+../examples/conway/main.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+pub mod custom_components;
+pub mod global_pixel_map;
+
+extern crate dotenv;
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
+use std::{collections::HashMap, time::Instant};
+
+use dotenv::dotenv;
+
+use imgui::Ui;
+use log::{debug, error, info};
+use pixpox::pixpox_app::App;
+use pixpox::pixpox_utils;
+use pixpox_app::Config;
+use pixpox_ecs::entity::Entity;
+use pixpox_ecs::{world, Texture};
+use pixpox_ecs::{Run, Update};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_utils::{conway::ConwayGrid, Stats};
+use rand::Rng;
+use winit::dpi::{LogicalPosition, Position};
+use winit_input_helper::WinitInputHelper;
+
+use crate::global_pixel_map::GlobalPixelMap;
+use pixpox_renderer::{Camera, Direction};
+
+use crate::custom_components::ConwayGridComponent;
+
+const WINDOW_TITLE: &str = "pixpox!";
+
+fn main() {
+    dotenv().ok();
+    pollster::block_on(run());
+}
+
+fn show_metrics(ui: &mut Ui, _state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
+async fn run() {
+    let cfg: Config =
+        confy::load_path("./examples/conway/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+
+    let mut app = App::new(cfg.clone());
+
+    // Create a camera
+    let camera = Camera::new(
+        0,
+        0,
+        cfg.window_height,
+        cfg.window_width,
+        cfg.window_height,
+        cfg.window_width,
+    );
+
+    // Define global data structure
+    let global_pixel_map = GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
+
+    // Initialise world; fill global data structures
+    let entity = app.world.spawn();
+
+    let grid_component = ConwayGridComponent::new(cfg.window_height, cfg.window_width, 0.10);
+
+    app.world.add_component_to_entity(entity, grid_component);
+
+    // Define UI Callbacks and States
+    let show_metrics_state = &mut true;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        // ui.show_metrics_window(state);
+        ui.window("Conway Performance (World)")
+            .position([60.0, 60.0], imgui::Condition::Once)
+            .size([200.0, 200.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                }
+            });
+    };
+
+    let show_about_state = &mut false;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui.register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui.register_child("Debug", &mut performance_metrics);
+
+    // write storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
+
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+    }
+
+    app.run::<GlobalPixelMap>().await;
+}
+
+../examples/conway/main.rs end
+../examples/conway/custom_components.rs begin
+use std::{collections::HashMap, sync::RwLock};
+
+use log::{debug, error};
+use pixpox_app::App;
+use pixpox_ecs::{
+    entity::{self, Entity},
+    InputHandler, Label, Run, Storage, Texture, Update, World,
+};
+use pixpox_utils::conway::ConwayGrid;
+use winit::{
+    dpi::{LogicalPosition, Position},
+    event::VirtualKeyCode,
+};
+use winit_input_helper::WinitInputHelper;
+
+use crate::global_pixel_map::GlobalPixelMap;
+
+#[derive(Clone)]
+pub struct ConwayGridComponent {
+    inner: ConwayGrid,
+    paused: bool,
+}
+
+impl ConwayGridComponent {
+    pub fn new(height: u32, width: u32, gen_chance: f64) -> Self {
+        Self {
+            inner: ConwayGrid::new(height, width, gen_chance),
+            paused: true,
+        }
+    }
+}
+
+impl Run for ConwayGridComponent {
+    fn run(&mut self, _storage: &pixpox_ecs::Storage) {
+        if self.paused {
+            return;
+        }
+
+        self.inner.next_state();
+    }
+}
+
+impl Update for ConwayGridComponent {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
+        let mut storage = storage.write().unwrap();
+
+        if input.winit.key_pressed(VirtualKeyCode::P) {
+            log::info!("Toggled world");
+            self.paused = !self.paused;
+        }
+
+        if input.winit.key_pressed(VirtualKeyCode::C) {
+            log::info!("Clear grid");
+            self.inner.clear_grid();
+        }
+
+        if input.winit.mouse_held(0) {
+            log::info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
+            self.inner.set_line(input.mouse, input.mouse_prev, true);
+        }
+
+        // Fetch PixelMap
+        let pixelmap = storage
+            .query_storage_mut::<GlobalPixelMap>("pixelmap")
+            .expect("Could not query Pixel Map");
+
+        pixelmap.draw_flat_vec(&mut self.inner.get_color_vec());
+    }
+}
+
+impl Label for ConwayGridComponent {
+    fn label(&mut self) -> &'static str {
+        "ConwayGrid"
+    }
+}
+
+../examples/conway/custom_components.rs end
+../examples/conway/global_pixel_map.rs begin
+use log::{debug, error};
+use pixpox_ecs::{InputHandler, Texture, Update};
+use winit::event::VirtualKeyCode;
+
+use pixpox_renderer::{Camera, Direction};
+
+#[derive(Debug)]
+pub struct GlobalPixelMap {
+    pixelmap: Vec<[u8; 4]>,
+    window_width: u32,
+    window_height: u32,
+    camera: Camera,
+}
+
+impl GlobalPixelMap {
+    /// Creates a new empty pixelmap with the given dimensions.
+    /// The pixelmap is initially filled with the given clear color.
+    ///
+    /// ### Arguments
+    ///
+    /// * `window_width` - The width of the pixelmap in pixels.
+    /// * `window_height` - The height of the pixelmap in pixels.
+    ///
+    /// ### Returns
+    ///
+    /// A new PixelMap instance.
+    ///
+    /// ### Example
+    ///
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// let pixelmap = PixelMap::new_empty(640, 480);
+    /// ```
+    pub fn new_empty(window_height: u32, window_width: u32, camera: Camera) -> Self {
+        // assert camera fits pixelmap dimensions
+        assert!(
+            camera.get_width() <= window_width && camera.get_height() <= window_height,
+            "Camera dimensions must be smaller than pixelmap dimensions"
+        );
+
+        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
+
+        for _y in 0..window_height {
+            for _x in 0..window_width {
+                let c: [u8; 4] = [0, 0, 0, 0];
+                pixelmap.push(c);
+            }
+        }
+
+        Self {
+            pixelmap,
+            window_width,
+            window_height,
+            camera,
+        }
+    }
+
+    /// Returns index of the position in the grid
+    /// * `pos`: (isize, isize) - (column, row) coordinates
+    pub fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.window_width as isize + pos.0;
+        idx as usize
+    }
+
+    /// Draws a pixel at the given position with the given color.
+    /// * `pos`: the position of the pixel to draw.
+    /// * `color`: the color to use when drawing the pixel.
+    pub fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
+        let idx = self.get_idx(pos);
+        self.pixelmap[idx as usize] = color;
+    }
+
+    /// Draws a flat vector of pixels to the screen.
+    /// * `vec`: the vector of pixels to draw.
+    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
+        std::mem::swap(&mut self.pixelmap, vec);
+    }
+
+    /// Extracts and scales the camera pixelmap to the window pixelmap.
+    /// * `camera`: the camera to use for extracting the visible region.
+    /// ### Example
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// # use camera::Camera;
+    /// let mut pixelmap = PixelMap::new_empty(640, 480);
+    /// let camera = Camera::new(0, 0, 320, 240);
+    /// pixelmap.extract_and_scale_visible_region(&camera);
+    /// ```
+    /// ### Returns
+    /// A vector of pixels representing the visible region of the camera.
+    /// The vector is scaled to the window dimensions.
+    pub fn extract_and_scale_visible_region(&self, camera: &Camera) -> Vec<[u8; 4]> {
+        debug!(
+            "extract_and_scale_visible_region() called with camera: {:?}",
+            camera
+        );
+
+        let sf_width = self.window_width as f32 / camera.get_width() as f32;
+        let sf_height = self.window_height as f32 / camera.get_height() as f32;
+        // let sf = sf_width.min(sf_height).ceil() as u32;
+        let sfw = sf_width.ceil() as u32;
+        let sfh = sf_height.ceil() as u32;
+
+        debug!(
+            "region: [window_width: {}, camera.width: {} | window.height: {}, camera.height: {}]",
+            self.window_width,
+            camera.get_width(),
+            self.window_height,
+            camera.get_height()
+        );
+ 
+        debug!("sfw: {}", sfw);
+        debug!("sfh: {}", sfh);
+
+        // scale camera_pixelmap to window_pixelmap
+        let mut window_pixelmap = vec![[0; 4]; (self.window_width * self.window_height) as usize];
+        for camera_y in camera.get_y()..(camera.get_y() + camera.get_height()) {
+            for camera_x in camera.get_x()..(camera.get_x() + camera.get_width()) {
+                // calculate real indexes
+                let (real_x, real_y) = (camera_x - camera.get_x(), camera_y - camera.get_y());
+
+                // calculate camera index
+                let camera_idx = self.get_idx((camera_x as isize, camera_y as isize));
+
+                // ensure camera index is in bounds
+                if camera_idx >= self.pixelmap.len() {
+                    continue;
+                }
+
+                // get camera pixel value to scale
+                let pixel_value = self.pixelmap[camera_idx as usize];
+
+                // scale camera pixel value to real window
+                for dy in 0..sfh {
+                    for dx in 0..sfw {
+                        let s_x = (real_x * sfw + dx).clamp(0, self.window_width as u32 - 1);
+                        let s_y = (real_y * sfh + dy).clamp(0, self.window_height as u32 - 1);
+                        let s_idx = s_y as usize * self.window_width as usize + s_x as usize;
+
+                        window_pixelmap[s_idx] = pixel_value;
+                    }
+                }
+            }
+        }
+
+        window_pixelmap
+    }
+}
+
+impl Texture for GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]) {
+        let pixelmap = self.extract_and_scale_visible_region(&self.camera);
+
+        debug!("pixelmap len: {}", pixelmap.len());
+
+        let pixel_chunks = pixels.chunks_exact_mut(4);
+
+        for (c, pix) in pixelmap.iter().zip(pixel_chunks) {
+            pix.copy_from_slice(c);
+        }
+    }
+
+    fn update(&mut self, input: &InputHandler) {
+        let scroll_delta = input.winit.scroll_diff();
+        // log::error!("update() mouse scroll delta: [{}]", scroll_delta);
+
+        // if scroll up, zoom in
+        if scroll_delta >= 1.0 {
+            self.camera.zoom(0.8);
+        }
+
+        // if scroll down, zoom out
+        if scroll_delta <= -1.0 {
+            self.camera.zoom(1.2);
+        }
+
+        // if key D is pressed, move camera right
+        if input.winit.key_held(VirtualKeyCode::D) {
+            self.camera.move_direction(Direction::Right);
+        }
+
+        // if key A is held, move camera left
+        if input.winit.key_held(VirtualKeyCode::A) {
+            self.camera.move_direction(Direction::Left);
+        }
+
+        // if key W is held, move camera up
+        if input.winit.key_held(VirtualKeyCode::W) {
+            self.camera.move_direction(Direction::Up);
+        }
+
+        // if key S is held, move camera down
+        if input.winit.key_held(VirtualKeyCode::S) {
+            self.camera.move_direction(Direction::Down);
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.window_width, self.window_height);
+    }
+
+    fn get_camera(&self) -> Camera {
+        self.camera.clone()
+    }
+}
+
+../examples/conway/global_pixel_map.rs end
+../examples/ecs/AppConfig.toml begin
+window_title = "ECS"
+window_height = 310
+window_width = 521
+window_scale = 2.9
+window_fullscreen = false
+
+../examples/ecs/AppConfig.toml end
+../examples/ecs/main.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+pub mod custom_components;
+pub mod global_pixel_map;
+
+extern crate dotenv;
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
+use std::{collections::HashMap, time::Instant};
+
+use custom_components::Cell;
+use dotenv::dotenv;
+
+use imgui::Ui;
+use log::{debug, error, info};
+use pixpox::pixpox_app::App;
+use pixpox::pixpox_utils;
+use pixpox_app::Config;
+use pixpox_ecs::entity::Entity;
+use pixpox_ecs::{Run, InputHandler};
+use pixpox_ecs::{world, Texture};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_renderer::Camera;
+use pixpox_utils::{Stats, conway::ConwayGrid, CA::letters};
+use rand::Rng;
+use winit::dpi::{LogicalPosition, Position};
+
+use crate::global_pixel_map::GlobalPixelMap;
+
+const WINDOW_TITLE: &str = "pixpox!";
+
+fn main() {
+    dotenv().ok();
+    pollster::block_on(run());
+}
+
+fn show_metrics(ui: &mut Ui, state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
+async fn run() {
+    let cfg: Config =
+        confy::load_path("./examples/ecs/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+    let mut app = App::new(cfg.clone());
+
+    let now = Instant::now();
+    let mut entities_count = 0;
+    let mut rng = rand::thread_rng();
+
+    // Create a camera
+    let camera = Camera::new(
+        0,
+        0,
+        cfg.window_height,
+        cfg.window_width,
+        cfg.window_height,
+        cfg.window_width,
+    );
+
+    // Define global data structures
+    let global_pixel_map =
+        GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
+
+    let mut optim_grid: ConwayGrid = ConwayGrid::new(cfg.window_width, cfg.window_height, 0.10);
+
+    // Initialise world; fill global data structures
+    for y in 0..cfg.window_height {
+        for x in 0..cfg.window_width {
+            let entity = app.world.spawn();
+
+            let pos = (x as isize, y as isize);
+            let alive = rng.gen_bool(0.10);
+
+            let cell_component = Cell::new(entity.id, pos, alive);
+
+            app.world.add_component_to_entity(entity, cell_component);
+
+            optim_grid.set_cell(pos, alive);
+
+            entities_count += 1;
+        }
+    }
+
+    // Define UI Callbacks and States
+    let mut show_metrics_state = &mut false;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        ui.show_metrics_window(state);
+        ui.window("ECS Performance (World)")
+            .position([60.0, 390.0], imgui::Condition::Once)
+            .size([400.0, 300.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                ui.text("entities: ".to_owned() + &entities_count.to_string());
+
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                };
+            });
+    };
+
+    let mut show_about_state = &mut true;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui
+        .register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui
+        .register_child("Debug", &mut performance_metrics);
+
+    // write storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
+
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+
+        storage.new_bucket::<ConwayGrid>("optim_grid", optim_grid);
+
+        let (width, height) = (cfg.window_width, cfg.window_height);
+        storage.new_bucket::<(u32, u32)>("grid-size", (width, height));
+    }
+
+    info!(
+        "Main::run() create {} entities in {} seconds",
+        entities_count,
+        now.elapsed().as_secs_f32().to_string()
+    );
+
+    app.run::<GlobalPixelMap>()
+        .await;
+}
+../examples/ecs/main.rs end
+../examples/ecs/custom_components.rs begin
+use std::{collections::HashMap, sync::RwLock};
+
+use imgui::InputFloat2;
+use log::{debug, error};
+use pixpox_app::App;
+use pixpox_ecs::{
+    entity::{self, Entity},
+    Label, Run, Storage, Texture, Update, World, InputHandler,
+};
+use pixpox_utils::conway::ConwayGrid;
+use winit::dpi::{LogicalPosition, Position};
+use winit_input_helper::WinitInputHelper;
+
+use crate::global_pixel_map::GlobalPixelMap;
+
+// Cell
+#[derive(Copy, Clone)]
+pub struct Cell {
+    entity_id: usize,
+    label: &'static str,
+
+    pos: (isize, isize),
+    state: bool,
+    heat: u8,
+    color: [u8; 4],
+    change: bool
+}
+
+impl Cell {
+    pub fn new(entity_id: usize, pos: (isize, isize), state: bool) -> Self {
+        let color = if state {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 0, 255]
+        };
+
+        Self {
+            entity_id,
+            label: "Cell",
+            pos,
+            state,
+            heat: 0,
+            color,
+            change: false
+        }
+    }
+}
+
+impl Label for Cell {
+    fn label(&mut self) -> &'static str {
+        return self.label;
+    }
+}
+
+impl Run for Cell {
+    fn run(&mut self, storage: &Storage) {
+        let optim_grid = storage
+            .query_storage::<ConwayGrid>("optim_grid")
+            .expect("Could not query optim_grid");
+
+        let neibs = optim_grid.count_neibs(self.pos);
+        // error!("neibs: {}", neibs);
+
+        if self.state {
+            self.state = neibs == 2 || neibs == 3;
+        } else {
+            self.state = neibs == 3;
+        }
+
+        self.heat = if self.state == true {
+            255
+        } else if self.heat > 0 {
+            self.heat - 1
+        } else {
+            0
+        };
+
+        // Update cell color
+        let old_color = self.color;
+        self.color = if self.state == true {
+            [255, 0, 0, 255]
+        } else {
+            [self.heat, 0, 0, 50]
+        };
+
+        self.change = old_color != self.color;
+    }
+}
+
+impl Update for Cell {
+    fn update(&mut self, rw_storage: &RwLock<Storage>, input: &InputHandler) {
+        if self.change {
+            let mut storage = rw_storage.write().unwrap();
+
+            // Fetch & Update cell in grid
+            let grid = storage
+                .query_storage_mut::<ConwayGrid>("optim_grid")
+                .expect("Could not get optim_grid");
+
+            grid.set_cell(self.pos, self.state);
+
+            let pixelmap = storage
+                .query_storage_mut::<GlobalPixelMap>("pixelmap")
+                .expect("Could not query Pixel Map");
+
+            pixelmap.draw_pos((self.pos.0, self.pos.1), self.color);
+        }
+    }
+}
+
+../examples/ecs/custom_components.rs end
+../examples/ecs/global_pixel_map.rs begin
+use log::{debug, error};
+use pixpox_ecs::{InputHandler, Texture, Update};
+use winit::event::VirtualKeyCode;
+
+use pixpox_renderer::{Camera, Direction};
+
+#[derive(Debug)]
+pub struct GlobalPixelMap {
+    pixelmap: Vec<[u8; 4]>,
+    window_width: u32,
+    window_height: u32,
+    camera: Camera,
+}
+
+impl GlobalPixelMap {
+    /// Creates a new empty pixelmap with the given dimensions.
+    /// The pixelmap is initially filled with the given clear color.
+    ///
+    /// ### Arguments
+    ///
+    /// * `window_width` - The width of the pixelmap in pixels.
+    /// * `window_height` - The height of the pixelmap in pixels.
+    ///
+    /// ### Returns
+    ///
+    /// A new PixelMap instance.
+    ///
+    /// ### Example
+    ///
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// let pixelmap = PixelMap::new_empty(640, 480);
+    /// ```
+    pub fn new_empty(window_height: u32, window_width: u32, camera: Camera) -> Self {
+        debug!("camera width: {}, window_width: {}", camera.get_width(), camera.get_height());
+        // assert camera fits pixelmap dimensions
+        assert!(
+            camera.get_width() <= window_width && camera.get_height() <= window_height,
+            "Camera dimensions must be smaller than pixelmap dimensions"
+        );
+
+        let mut pixelmap: Vec<[u8; 4]> = Vec::new();
+
+        for _y in 0..window_height {
+            for _x in 0..window_width {
+                let c: [u8; 4] = [0, 0, 0, 0];
+                pixelmap.push(c);
+            }
+        }
+
+        Self {
+            pixelmap,
+            window_width,
+            window_height,
+            camera,
+        }
+    }
+
+    /// Returns index of the position in the grid
+    /// * `pos`: (isize, isize) - (column, row) coordinates
+    pub fn get_idx(&self, pos: (isize, isize)) -> usize {
+        let idx = pos.1 * self.window_width as isize + pos.0;
+        idx as usize
+    }
+
+    /// Draws a pixel at the given position with the given color.
+    /// * `pos`: the position of the pixel to draw.
+    /// * `color`: the color to use when drawing the pixel.
+    pub fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
+        let idx = self.get_idx(pos);
+        self.pixelmap[idx as usize] = color;
+    }
+
+    /// Draws a flat vector of pixels to the screen.
+    /// * `vec`: the vector of pixels to draw.
+    pub fn draw_flat_vec(&mut self, vec: &mut Vec<[u8; 4]>) {
+        std::mem::swap(&mut self.pixelmap, vec);
+    }
+
+    /// Extracts and scales the camera pixelmap to the window pixelmap.
+    /// * `camera`: the camera to use for extracting the visible region.
+    /// ### Example
+    /// ```
+    /// # use pixelmap::PixelMap;
+    /// # use camera::Camera;
+    /// let mut pixelmap = PixelMap::new_empty(640, 480);
+    /// let camera = Camera::new(0, 0, 320, 240);
+    /// pixelmap.extract_and_scale_visible_region(&camera);
+    /// ```
+    /// ### Returns
+    /// A vector of pixels representing the visible region of the camera.
+    /// The vector is scaled to the window dimensions.
+    pub fn extract_and_scale_visible_region(&self, camera: &Camera) -> Vec<[u8; 4]> {
+        debug!(
+            "extract_and_scale_visible_region() called with camera: {:?}",
+            camera
+        );
+
+        let sf_width = self.window_width as f32 / camera.get_width() as f32;
+        let sf_height = self.window_height as f32 / camera.get_height() as f32;
+        // let sf = sf_width.min(sf_height).ceil() as u32;
+        let sfw = sf_width.ceil() as u32;
+        let sfh = sf_height.ceil() as u32;
+
+        debug!(
+            "region: [window_width: {}, camera.width: {} | window.height: {}, camera.height: {}]",
+            self.window_width,
+            camera.get_width(),
+            self.window_height,
+            camera.get_height()
+        );
+ 
+        debug!("sfw: {}", sfw);
+        debug!("sfh: {}", sfh);
+
+        // scale camera_pixelmap to window_pixelmap
+        let mut window_pixelmap = vec![[0; 4]; (self.window_width * self.window_height) as usize];
+        for camera_y in camera.get_y()..(camera.get_y() + camera.get_height()) {
+            for camera_x in camera.get_x()..(camera.get_x() + camera.get_width()) {
+                // calculate real indexes
+                let (real_x, real_y) = (camera_x - camera.get_x(), camera_y - camera.get_y());
+
+                // calculate camera index
+                let camera_idx = self.get_idx((camera_x as isize, camera_y as isize));
+
+                // ensure camera index is in bounds
+                if camera_idx >= self.pixelmap.len() {
+                    continue;
+                }
+
+                // get camera pixel value to scale
+                let pixel_value = self.pixelmap[camera_idx as usize];
+
+                // scale camera pixel value to real window
+                for dy in 0..sfh {
+                    for dx in 0..sfw {
+                        let s_x = (real_x * sfw + dx).clamp(0, self.window_width as u32 - 1);
+                        let s_y = (real_y * sfh + dy).clamp(0, self.window_height as u32 - 1);
+                        let s_idx = s_y as usize * self.window_width as usize + s_x as usize;
+
+                        window_pixelmap[s_idx] = pixel_value;
+                    }
+                }
+            }
+        }
+
+        window_pixelmap
+    }
+}
+
+impl Texture for GlobalPixelMap {
+    fn render(&self, pixels: &mut [u8]) {
+        let pixelmap = self.extract_and_scale_visible_region(&self.camera);
+
+        debug!("pixelmap len: {}", pixelmap.len());
+
+        let pixel_chunks = pixels.chunks_exact_mut(4);
+
+        for (c, pix) in pixelmap.iter().zip(pixel_chunks) {
+            pix.copy_from_slice(c);
+        }
+    }
+
+    fn update(&mut self, input: &InputHandler) {
+        let scroll_delta = input.winit.scroll_diff();
+        // log::error!("update() mouse scroll delta: [{}]", scroll_delta);
+
+        // if scroll up, zoom in
+        if scroll_delta >= 1.0 {
+            self.camera.zoom(0.8);
+        }
+
+        // if scroll down, zoom out
+        if scroll_delta <= -1.0 {
+            self.camera.zoom(1.2);
+        }
+
+        // if key D is pressed, move camera right
+        if input.winit.key_held(VirtualKeyCode::D) {
+            self.camera.move_direction(Direction::Right);
+        }
+
+        // if key A is held, move camera left
+        if input.winit.key_held(VirtualKeyCode::A) {
+            self.camera.move_direction(Direction::Left);
+        }
+
+        // if key W is held, move camera up
+        if input.winit.key_held(VirtualKeyCode::W) {
+            self.camera.move_direction(Direction::Up);
+        }
+
+        // if key S is held, move camera down
+        if input.winit.key_held(VirtualKeyCode::S) {
+            self.camera.move_direction(Direction::Down);
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        return (self.window_width, self.window_height);
+    }
+
+    fn get_camera(&self) -> Camera {
+        self.camera.clone()
+    }
+}
+
+../examples/ecs/global_pixel_map.rs end
+../examples/physics-ca/AppConfig.toml begin
+window_title = "Cell Realm"
+window_height = 300
+window_width = 500
+window_scale = 2.0
+window_fullscreen = false
+
+../examples/physics-ca/AppConfig.toml end
+../examples/physics-ca/main.rs begin
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
+pub mod custom_components;
+
+extern crate dotenv;
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
+use std::sync::{Mutex, RwLock};
+use std::{collections::HashMap, time::Instant};
+
+use dotenv::dotenv;
+
+use imgui::Ui;
+use log::{debug, error, info};
+use pixpox::pixpox_app::App;
+use pixpox::pixpox_utils;
+use pixpox_app::Config;
+use pixpox_ecs::entity::Entity;
+use pixpox_ecs::{world, InputHandler, Texture, World};
+use pixpox_ecs::{Run, Update};
+use pixpox_renderer::gui::{GuiChild, GuiParent};
+use pixpox_common::Camera;
+use pixpox_utils::CA::cell_realm::CellRealm;
+use pixpox_utils::{conway::ConwayGrid, Stats};
+use rand::Rng;
+use winit::dpi::{LogicalPosition, Position};
+use winit::event::{DeviceEvent, Event, MouseButton, VirtualKeyCode};
+use winit_input_helper::WinitInputHelper;
+
+use crate::custom_components::CellRealmComponent;
+
+use pixpox_renderer::global_pixel_map::GlobalPixelMap;
+
+const WINDOW_TITLE: &str = "pixpox!";
+
+fn main() {
+    dotenv().ok();
+    pollster::block_on(run());
+}
+
+fn show_metrics(ui: &mut Ui, state: &mut bool) {
+    ui.show_metrics_window(&mut true);
+}
+
+async fn run() {
+    let cfg: Config =
+        confy::load_path("./examples/physics-ca/AppConfig.toml").expect("Could not load config.");
+
+    dbg!(cfg.clone());
+
+    let mut app = App::new(cfg.clone());
+   
+    // Create a camera
+    let camera = Camera::new(
+        0,
+        0,
+        cfg.window_height,
+        cfg.window_width,
+        cfg.window_height,
+        cfg.window_width,
+    );
+
+    // Define global data structures
+    let global_pixel_map =
+        GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
+
+    // Initialise world; fill global data structures
+    let entity = app.world.spawn();
+
+    let grid_component = CellRealmComponent::new(cfg.window_height, cfg.window_width);
+
+    app.world.add_component_to_entity(entity, grid_component);
+
+    // Define UI Callbacks and States
+    let show_metrics_state = &mut true;
+    let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
+        // ui.show_metrics_window(state);
+        ui.window(cfg.window_title.clone())
+            .position([60.0, 60.0], imgui::Condition::Once)
+            .size([200.0, 200.0], imgui::Condition::FirstUseEver)
+            .collapsible(true)
+            .build(|| {
+                for s in stats.get_formatted_stats().iter() {
+                    ui.text(s);
+                }
+            });
+    };
+
+    let show_about_state = &mut false;
+    let mut show_about_closure = |ui: &mut Ui, state: &mut bool, _stats: &Stats| {
+        ui.show_about_window(state);
+    };
+
+    // Setup GUI
+    app.gui.register_parent("Help");
+    app.gui.register_parent("Debug");
+
+    let mut performance_metrics = GuiChild::new(
+        "Performance Metrics",
+        &mut show_metrics_closure,
+        show_metrics_state,
+    );
+    let mut about = GuiChild::new("About", &mut show_about_closure, show_about_state);
+
+    app.gui.register_child("Help", &mut about);
+    app.gui.register_child("Debug", &mut performance_metrics);
+
+    // Get write lock for storage
+    {
+        let mut storage = app.world.storage.write().unwrap();
+
+        storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
+
+        storage.new_bucket::<usize>("selected-tool", 0);
+    }
+
+    app.run::<GlobalPixelMap>().await;
+}
+../examples/physics-ca/main.rs end
+../examples/physics-ca/custom_components.rs begin
+use std::{collections::HashMap, sync::RwLock};
+
+use log::{debug, error, info};
+use pixpox_app::App;
+use pixpox_ecs::{
+    entity::{self, Entity},
+    Label, Run, Storage, Texture, Update, World, InputHandler,
+};
+use pixpox_utils::{
+    conway::ConwayGrid,
+    CA::cell_realm::{CellRealm, Cell},
+};
+use winit::{
+    dpi::{LogicalPosition, Position},
+    event::VirtualKeyCode,
+};
+use winit_input_helper::WinitInputHelper;
+
+use crate::GlobalPixelMap;
+
+#[derive(Clone)]
+pub struct CellRealmComponent {
+    inner: CellRealm,
+    paused: bool,
+}
+
+impl CellRealmComponent {
+    pub fn new(height: u32, width: u32) -> Self {
+        Self {
+            inner: CellRealm::new(height, width),
+            paused: false,
+        }
+    }
+}
+
+impl Run for CellRealmComponent {
+    fn run(&mut self, _storage: &pixpox_ecs::Storage) {
+        if !self.paused {
+            self.inner.next_state();
+        }
+    }
+}
+
+impl Update for CellRealmComponent {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
+        let mut storage = storage.write().unwrap();
+
+        if input.winit.key_pressed(VirtualKeyCode::P) {
+            info!("Toggled world");
+            self.paused = !self.paused;
+        }
+
+        // Left mouse click
+        if input.winit.mouse_held(0) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
+            self.inner.set_circle(input.mouse, 30, Cell::SAND);
+        }
+
+        // Right mouse click
+        if input.winit.mouse_held(1) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
+            self.inner.set_circle(input.mouse, 30, Cell::WATER);
+        }
+
+        // Middle mouse click
+        if input.winit.mouse_held(2) {
+            info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse_prev.1);
+
+            self.inner.set_line(input.mouse, input.mouse_prev, Cell::SOLID);
+        }
+
+        // clear grid
+        if input.winit.key_pressed(VirtualKeyCode::C) {
+            log::info!("Clear grid");
+            self.inner.clear_grid();
+        }
+
+        // Fetch PixelMap
+        let pixelmap = storage
+            .query_storage_mut::<GlobalPixelMap>("pixelmap")
+            .expect("Could not query Pixel Map");
+
+        pixelmap.draw_flat_vec(&mut self.inner.get_color_vec());
+    }
+}
+
+impl Label for CellRealmComponent {
+    fn label(&mut self) -> &'static str {
+        "CellRealm"
+    }
+}
+
+../examples/physics-ca/custom_components.rs end
+../src/lib.rs begin
+pub use pixpox_renderer;
+pub use pixpox_utils;
+pub use pixpox_physics;
+pub use pixpox_app;
+pub use pixpox_ecs;
+pub use pixpox_common;
+../src/lib.rs end
