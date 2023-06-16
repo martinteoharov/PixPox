@@ -11,7 +11,7 @@ use pixpox_utils::conway::ConwayGrid;
 use winit::dpi::{LogicalPosition, Position};
 use winit_input_helper::WinitInputHelper;
 
-use crate::global_pixel_map::GlobalPixelMap;
+use crate::GlobalPixelMap;
 
 // Cell
 #[derive(Copy, Clone)]

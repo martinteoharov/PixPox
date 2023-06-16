@@ -59,7 +59,7 @@ impl Update for CellRealmComponent {
         // Right mouse click
         if input.winit.mouse_held(1) {
             info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
-            self.inner.set_circle(input.mouse, 30, Cell::WATER);
+            self.inner.set_pos(input.mouse, Cell::WATER);
         }
 
         // Middle mouse click

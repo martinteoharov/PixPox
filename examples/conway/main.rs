@@ -112,5 +112,5 @@ async fn run() {
         storage.new_bucket::<GlobalPixelMap>("pixelmap", global_pixel_map);
     }
 
-    app.run::<GlobalPixelMap>().await;
+    app.run().await;
 }

@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 pub mod custom_components;
-pub mod global_pixel_map;
 
 extern crate dotenv;
 
@@ -29,7 +28,7 @@ use pixpox_utils::{Stats, conway::ConwayGrid, CA::letters};
 use rand::Rng;
 use winit::dpi::{LogicalPosition, Position};
 
-use crate::global_pixel_map::GlobalPixelMap;
+use pixpox_renderer::global_pixel_map::GlobalPixelMap;
 
 const WINDOW_TITLE: &str = "pixpox!";
 
@@ -143,6 +142,5 @@ async fn run() {
         now.elapsed().as_secs_f32().to_string()
     );
 
-    app.run::<GlobalPixelMap>()
-        .await;
+    app.run().await;
 }

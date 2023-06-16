@@ -67,7 +67,7 @@ impl GlobalPixelMap {
     /// Draws a pixel at the given position with the given color.
     /// * `pos`: the position of the pixel to draw.
     /// * `color`: the color to use when drawing the pixel.
-    fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
+    pub fn draw_pos(&mut self, pos: (isize, isize), color: [u8; 4]) {
         let idx = self.get_idx(pos);
         self.pixelmap[idx as usize] = color;
     }
