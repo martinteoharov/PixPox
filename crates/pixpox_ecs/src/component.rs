@@ -1,7 +1,7 @@
 use std::sync::RwLock;
 
 use crate::{Storage};
-use pixpox_utils::InputHandler;
+use pixpox_utils::{InputHandler, Stats};
 use pixpox_common::Camera;
 
 /// The Label trait is used to give a human-readable label to an ECS component.
@@ -70,7 +70,7 @@ pub trait Run {
 /// }
 /// ```
 pub trait Update {
-    fn update(&mut self, storage: &RwLock<Storage>, input: &InputHandler);
+    fn update(&mut self, storage: &RwLock<Storage>, input: &InputHandler, stats: &RwLock<Stats>);
 }
 
 /// The Texture trait defines how a component should be rendered.

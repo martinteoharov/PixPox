@@ -18,11 +18,11 @@ use log::{debug, error, info};
 use pixpox::pixpox_app::App;
 use pixpox::pixpox_utils;
 use pixpox_app::Config;
+use pixpox_common::Camera;
 use pixpox_ecs::entity::Entity;
 use pixpox_ecs::{world, InputHandler, Texture, World};
 use pixpox_ecs::{Run, Update};
 use pixpox_renderer::gui::{GuiChild, GuiParent};
-use pixpox_common::Camera;
 use pixpox_utils::CA::cell_realm::CellRealm;
 use pixpox_utils::{conway::ConwayGrid, Stats};
 use rand::Rng;
@@ -52,7 +52,7 @@ async fn run() {
     dbg!(cfg.clone());
 
     let mut app = App::new(cfg.clone());
-   
+
     // Create a camera
     let camera = Camera::new(
         0,
@@ -64,8 +64,7 @@ async fn run() {
     );
 
     // Define global data structures
-    let global_pixel_map =
-        GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
+    let global_pixel_map = GlobalPixelMap::new_empty(cfg.window_height, cfg.window_width, camera);
 
     // Initialise world; fill global data structures
     let entity = app.world.spawn();
@@ -77,14 +76,17 @@ async fn run() {
     // Define UI Callbacks and States
     let show_metrics_state = &mut true;
     let mut show_metrics_closure = |ui: &mut Ui, state: &mut bool, stats: &Stats| {
-        // ui.show_metrics_window(state);
         ui.window(cfg.window_title.clone())
             .position([60.0, 60.0], imgui::Condition::Once)
             .size([200.0, 200.0], imgui::Condition::FirstUseEver)
             .collapsible(true)
+            .movable(true)
+            .scrollable(true)
+            .resizable(true)
             .build(|| {
-                for s in stats.get_formatted_stats().iter() {
-                    ui.text(s);
+                // Show formatted stats as a list, more readable.
+                for (index, s) in stats.get_formatted_stats().iter().enumerate() {
+                    ui.text(format!("{}. {}", index + 1, s));
                 }
             });
     };
@@ -117,5 +119,5 @@ async fn run() {
         storage.new_bucket::<usize>("selected-tool", 0);
     }
 
-    app.run().await;
+    app.run::<GlobalPixelMap>().await;
 }

@@ -21,6 +21,7 @@ use rayon::prelude::{IntoParallelRefIterator, IntoParallelRefMutIterator, Parall
 use winit::event::{Event, VirtualKeyCode};
 use winit_input_helper::WinitInputHelper;
 
+use crate::GlobalPixelMap as GlobalPixelMapTrait;
 use pixpox_utils::InputHandler;
 
 use crate::{
@@ -63,7 +64,7 @@ pub struct World {
     pub component_vecs: Vec<Box<dyn ComponentVec>>,
     pub storage: RwLock<Storage>,
     pub last_update: time::Instant,
-    pub stats: Stats,
+    pub stats: RwLock<Stats>,
     pub input: InputHandler,
     paused: bool,
 }
@@ -87,7 +88,7 @@ impl World {
             component_vecs,
             last_update: time::Instant::now(),
             storage: RwLock::new(Storage::new()),
-            stats: Stats::new(),
+            stats: RwLock::new(Stats::new()),
             input: InputHandler::new(),
             paused: false,
         }
@@ -208,8 +209,8 @@ impl World {
          */
     }
 
-    pub fn run(&mut self) {
-        self.stats.new_tick();
+    pub fn run<T: 'static + GlobalPixelMapTrait>(&mut self) {
+        self.stats.write().expect("Could not write lock stats").new_tick();
 
         if self.paused {
             return;
@@ -222,17 +223,17 @@ impl World {
             component_vec.run_all(&mut self.storage);
         }
         let elapsed = Instant::now() - now;
-        self.stats.update_sector("run()", elapsed.as_secs_f32());
+        self.stats.write().expect("KUR").update_sector("run()".to_string(), elapsed.as_secs_f32());
 
         let now = Instant::now();
         for component_vec in self.component_vecs.iter_mut() {
-            component_vec.update_all(&mut self.storage, &mut self.input);
+            component_vec.update_all(&mut self.storage, &mut self.input, &self.stats);
         }
         let mut storage = self.storage.write().expect("Could not lock storage");
-        storage.update_global_pixel_map(&self.input);
+        storage.update_global_pixel_map::<T>(&self.input);
 
         let elapsed = Instant::now() - now;
-        self.stats.update_sector("update()", elapsed.as_secs_f32());
+        self.stats.write().expect("KUR").update_sector("update()".to_string(), elapsed.as_secs_f32());
     }
 
     fn new_entity(&mut self) -> Entity {
@@ -267,7 +268,7 @@ pub trait ComponentVec: Send + Sync {
     fn as_any_mut(&mut self) -> &mut (dyn std::any::Any + Send + Sync);
     fn push_none(&mut self);
     fn run_all(&mut self, storage: &RwLock<Storage>);
-    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler);
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler, stats: &RwLock<Stats>);
 }
 
 impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
@@ -291,10 +292,10 @@ impl<T: 'static + Run + Update + Send + Sync> ComponentVec for Vec<Option<T>> {
         })
     }
 
-    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler) {
+    fn update_all(&mut self, storage: &mut RwLock<Storage>, input: &mut InputHandler, stats: &RwLock<Stats>) {
         self.par_iter_mut().for_each(|component| {
             if let Some(c) = component {
-                c.update(&storage, input);
+                c.update(&storage, input, stats);
             }
         })
     }

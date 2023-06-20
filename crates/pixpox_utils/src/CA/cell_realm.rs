@@ -1,4 +1,6 @@
-#[derive(Copy, Clone, PartialEq)]
+use std::{collections::HashMap, fmt};
+
+#[derive(Copy, Clone, PartialEq, Hash, Eq)]
 pub enum Cell {
     EMPTY,
     SAND,
@@ -13,6 +15,17 @@ impl Cell {
             Cell::SAND => [255, 255, 0, 255],
             Cell::WATER => [0, 0, 255, 255],
             Cell::SOLID => [255, 255, 255, 255],
+        }
+    }
+}
+
+impl fmt::Display for Cell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Cell::EMPTY => write!(f, "EMPTY"),
+            Cell::SAND => write!(f, "SAND"),
+            Cell::WATER => write!(f, "WATER"),
+            Cell::SOLID => write!(f, "SOLID"),
         }
     }
 }
@@ -48,16 +61,23 @@ impl CellRealm {
     }
 
     // Private function to map idx to real pos
-    fn get_pos(&self, idx: isize) -> (isize, isize) {
+    fn _get_pos(&self, idx: isize) -> (isize, isize) {
         let x = idx % self.width as isize;
         let y = idx / self.width as isize;
 
         (x, y)
     }
 
-    pub fn set_pos(&mut self, pos: (isize, isize), cell: Cell) {
+    fn set_pos(&mut self, pos: (isize, isize), cell: Cell) {
+        assert!(pos.0 >= 0 && pos.0 < self.width as isize, "out of bounds, pos: {:?}", pos);
+        assert!(pos.1 >= 0 && pos.1 < self.height as isize, "out of boudns, pos: {:?}", pos);
+
         let idx = self.get_idx(pos);
         self.cells[idx] = cell;
+    }
+
+    pub fn set_point(&mut self, pos: (isize, isize), cell: Cell) {
+        self.set_pos(pos, cell);
     }
 
     /// Implement Bresenham's line algorithm
@@ -101,6 +121,11 @@ impl CellRealm {
                 let distance_squared = dx * dx + dy * dy;
 
                 if distance_squared <= r_squared {
+                    // if out of bounds, continue
+                    if x < 0 || x >= self.width as isize || y < 0 || y >= self.height as isize {
+                        continue;
+                    }
+
                     self.set_pos((x, y), cell.clone());
                 }
             }
@@ -204,7 +229,7 @@ impl CellRealm {
         let mut next_states: Vec<Cell> = self.cells.clone();
 
         for y in (0..self.height as isize).rev() {
-            for x in (0..self.width as isize).rev() {
+            for x in 0..self.width as isize {
                 let cell = self.cells[self.get_idx((x, y))];
                 self.next_state_cell(x, y, cell, &mut next_positions, &mut next_states);
             }
@@ -224,4 +249,15 @@ impl CellRealm {
     pub fn get_color_vec(&mut self) -> Vec<[u8; 4]> {
         self.cells.iter().map(|cell| cell.get_color()).collect()
     }
+
+    // write a function that returns the amount of cells of each type
+    pub fn get_cell_count(&self) -> HashMap<Cell, usize> {
+        let mut cell_count: HashMap<Cell, usize> = HashMap::new();
+        for cell in self.cells.iter() {
+            let count = cell_count.entry(*cell).or_insert(0);
+            *count += 1;
+        }
+        cell_count
+    }
+
 }

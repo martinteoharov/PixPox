@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use serde_derive::{Deserialize, Serialize};
 
-use pixpox_renderer::{gui::Gui, Pixels, SurfaceTexture, GlobalPixelMap};
+use pixpox_renderer::{gui::Gui, GlobalPixelMap, Pixels, SurfaceTexture};
 use winit::{
     dpi::LogicalSize,
     event::{Event, VirtualKeyCode},
@@ -14,7 +14,9 @@ use winit::{
 
 use pixpox_common::Camera;
 
-use pixpox_ecs::{component::Texture as RenderTexture, GlobalPixelMap as GlobalPixelMapTrait, World};
+use pixpox_ecs::{
+    component::Texture as RenderTexture, GlobalPixelMap as GlobalPixelMapTrait, World,
+};
 use winit_input_helper::WinitInputHelper;
 
 use log::{error, info};
@@ -95,7 +97,7 @@ impl<'a> App<'a> {
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run<T: 'static + GlobalPixelMapTrait>(&mut self) {
         self.event_loop.run_return(|event, _target, control_flow| {
             // debug!("Event loop");
             let mut camera: Camera;
@@ -103,7 +105,7 @@ impl<'a> App<'a> {
             // The one and only event that winit_input_helper doesn't have for us...
             if let Event::RedrawRequested(_) = event {
                 // Run components
-                self.world.run();
+                self.world.run::<T>();
 
                 // Get screen frame to render to
                 let pixels = self.pixels.get_frame_mut();
@@ -136,7 +138,7 @@ impl<'a> App<'a> {
                         encoder,
                         render_target,
                         context,
-                        &self.world.stats,
+                        &self.world.stats.write().unwrap(),
                     )?;
 
                     Ok(())
@@ -144,7 +146,8 @@ impl<'a> App<'a> {
             }
 
             // Handle input events
-            self.gui.handle_event(&self.window, &event);
+            let should_propagate_event = self.gui.handle_event(&self.window, &event);
+
             let mut mouse_cell: (isize, isize) = (0, 0);
             let mut mouse_prev_cell: (isize, isize) = (0, 0);
 
@@ -216,7 +219,9 @@ impl<'a> App<'a> {
                 self.window.request_redraw();
             }
 
-            self.world.input.update(&event, mouse_cell, mouse_prev_cell);
+            if should_propagate_event {
+                self.world.input.update(&event, mouse_cell, mouse_prev_cell);
+            }
         });
     }
 }

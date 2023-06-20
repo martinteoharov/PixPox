@@ -8,7 +8,7 @@ use pixpox_ecs::{
 };
 use pixpox_utils::{
     conway::ConwayGrid,
-    CA::cell_realm::{CellRealm, Cell},
+    CA::cell_realm::{CellRealm, Cell}, stats, Stats,
 };
 use winit::{
     dpi::{LogicalPosition, Position},
@@ -42,7 +42,7 @@ impl Run for CellRealmComponent {
 }
 
 impl Update for CellRealmComponent {
-    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler, stats: &RwLock<Stats>) {
         let mut storage = storage.write().unwrap();
 
         if input.winit.key_pressed(VirtualKeyCode::P) {
@@ -59,7 +59,7 @@ impl Update for CellRealmComponent {
         // Right mouse click
         if input.winit.mouse_held(1) {
             info!("mouse pos: [{}, {}]", input.mouse.0, input.mouse.1);
-            self.inner.set_pos(input.mouse, Cell::WATER);
+            self.inner.set_circle(input.mouse, 10, Cell::WATER);
         }
 
         // Middle mouse click
@@ -73,6 +73,15 @@ impl Update for CellRealmComponent {
         if input.winit.key_pressed(VirtualKeyCode::C) {
             log::info!("Clear grid");
             self.inner.clear_grid();
+        }
+
+        // stats.write().expect("couldnt lock").update_sector("label".to_string(), 123.0);
+
+        let cell_count = self.inner.get_cell_count();
+
+        // iterate over cell_coutn and update stats
+        for (label, count) in cell_count {
+            stats.write().expect("couldnt lock").update_sector(label.to_string(), count as f32);
         }
 
         // Fetch PixelMap

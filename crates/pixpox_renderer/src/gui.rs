@@ -16,7 +16,11 @@ pub struct GuiChild<'a> {
 }
 
 impl<'a> GuiChild<'a> {
-    pub fn new(label: &'static str, cb: &'a mut dyn FnMut(&mut Ui, &mut bool, &Stats), state: &'a mut bool) -> Self {
+    pub fn new(
+        label: &'static str,
+        cb: &'a mut dyn FnMut(&mut Ui, &mut bool, &Stats),
+        state: &'a mut bool,
+    ) -> Self {
         Self { label, cb, state }
     }
 }
@@ -100,7 +104,7 @@ impl<'a> Gui<'a> {
         encoder: &mut wgpu::CommandEncoder,
         render_target: &wgpu::TextureView,
         context: &PixelsContext,
-        stats: &Stats
+        stats: &Stats,
     ) -> imgui_wgpu::RendererResult<()> {
         // Start a new Dear ImGui frame and update the cursor
         let ui = self.imgui.frame();
@@ -157,9 +161,16 @@ impl<'a> Gui<'a> {
         &mut self,
         window: &winit::window::Window,
         event: &winit::event::Event<()>,
-    ) {
+    ) -> bool {
         self.platform
             .handle_event(self.imgui.io_mut(), window, event);
+
+        // If ImGui is capturing the mouse, we don't want to process the click in our game logic.
+        if self.imgui.io().want_capture_mouse {
+            return false;
+        }
+
+        true
     }
 
     pub fn register_parent(&mut self, label: &'static str) {

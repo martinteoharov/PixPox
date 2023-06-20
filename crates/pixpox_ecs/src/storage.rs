@@ -129,7 +129,7 @@ impl Storage {
         None
     }
 
-    pub fn update_global_pixel_map(&mut self, input: &InputHandler) {
+    pub fn update_global_pixel_map<T: 'static + GlobalPixelMapTrait>(&mut self, input: &InputHandler) {
         let key = &self
             .interner
             .get("pixelmap")
@@ -141,7 +141,13 @@ impl Storage {
         );
 
         if let Some(data) = self.buckets.get_mut(key) {
-            if let Some(downcasted) = data.downcast_mut::<Box<dyn GlobalPixelMapTrait>>() {
+            if let Some(downcasted) = data.downcast_mut::<T>() {
+                debug!("Updating global pixel map");
+                debug!("Updating global pixel map");
+                debug!("Updating global pixel map");
+                debug!("Updating global pixel map");
+                debug!("Updating global pixel map");
+                debug!("Updating global pixel map");
                 downcasted.update(input);
             }
         }

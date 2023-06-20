@@ -1,10 +1,14 @@
-use std::{time::{self, Instant}, collections::HashMap, fmt::format};
+use std::{
+    collections::HashMap,
+    fmt::format,
+    time::{self, Instant},
+};
 
 pub struct Stats {
     last_update: time::Instant,
     fps: f32,
     acc: Vec<f32>,
-    sectors: HashMap<&'static str, f32>
+    sectors: HashMap<String, f32>,
 }
 
 impl Stats {
@@ -13,7 +17,7 @@ impl Stats {
             last_update: Instant::now(),
             fps: 0.0,
             acc: Vec::with_capacity(100000),
-            sectors: HashMap::new()
+            sectors: HashMap::new(),
         }
     }
 
@@ -43,7 +47,7 @@ impl Stats {
         0.0
     }
 
-    pub fn update_sector(&mut self, label: &'static str, value: f32) {
+    pub fn update_sector(&mut self, label: String, value: f32) {
         self.sectors.insert(label, value);
     }
 
@@ -53,11 +57,11 @@ impl Stats {
         ret.push("fps: ".to_owned() + &self.get_fps().to_string());
         ret.push("avg fps: ".to_owned() + &self.get_average_fps().to_string());
         ret.push("mean fps: ".to_owned() + &self.get_mean_fps().to_string());
-    
+
         for (k, v) in self.sectors.iter() {
             let s = format!("{}: {}", k, v);
             ret.push(s);
-        };
+        }
 
         ret
     }
