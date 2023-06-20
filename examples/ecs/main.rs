@@ -142,5 +142,5 @@ async fn run() {
         now.elapsed().as_secs_f32().to_string()
     );
 
-    app.run().await;
+    app.run::<GlobalPixelMap>().await;
 }

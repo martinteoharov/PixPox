@@ -7,7 +7,7 @@ use pixpox_ecs::{
     entity::{self, Entity},
     Label, Run, Storage, Texture, Update, World, InputHandler,
 };
-use pixpox_utils::conway::ConwayGrid;
+use pixpox_utils::{conway::ConwayGrid, Stats};
 use winit::dpi::{LogicalPosition, Position};
 use winit_input_helper::WinitInputHelper;
 
@@ -88,7 +88,7 @@ impl Run for Cell {
 }
 
 impl Update for Cell {
-    fn update(&mut self, rw_storage: &RwLock<Storage>, input: &InputHandler) {
+    fn update(&mut self, rw_storage: &RwLock<Storage>, input: &InputHandler, stats: &RwLock<Stats>) {
         if self.change {
             let mut storage = rw_storage.write().unwrap();
 

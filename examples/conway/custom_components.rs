@@ -6,7 +6,7 @@ use pixpox_ecs::{
     entity::{self, Entity},
     InputHandler, Label, Run, Storage, Texture, Update, World,
 };
-use pixpox_utils::conway::ConwayGrid;
+use pixpox_utils::{conway::ConwayGrid, Stats};
 use winit::{
     dpi::{LogicalPosition, Position},
     event::VirtualKeyCode,
@@ -41,7 +41,7 @@ impl Run for ConwayGridComponent {
 }
 
 impl Update for ConwayGridComponent {
-    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler) {
+    fn update(&mut self, storage: &RwLock<pixpox_ecs::Storage>, input: &InputHandler, stats: &RwLock<Stats>) {
         let mut storage = storage.write().unwrap();
 
         if input.winit.key_pressed(VirtualKeyCode::P) {
