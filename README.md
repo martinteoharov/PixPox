@@ -7,10 +7,8 @@
 
 PixPox is a 2D Game Engine built around the concept of simulating physics using Cellular Automata interactions. As of currently the project only offers the basics for creating a "game" if you can even call it that and only serves as a proof of concept. It is in active development.
 
-<p align="center">
-  <img src="https://github.com/martinteoharov/PixPox/assets/43793073/8eab95de-e830-40bf-8ea3-a9233a236807" width="500">
-  <img src="https://github.com/martinteoharov/PixPox/assets/43793073/2dbf8cc4-7bb7-42a4-93cb-cab42ad7d252" width="500">
-</p>
+  <img src="https://github.com/martinteoharov/PixPox/assets/43793073/8eab95de-e830-40bf-8ea3-a9233a236807">
+  <img src="https://github.com/martinteoharov/PixPox/assets/43793073/2dbf8cc4-7bb7-42a4-93cb-cab42ad7d252">
 
 ## Features
 - Input handling, event messaging, and resource management abstractions.
