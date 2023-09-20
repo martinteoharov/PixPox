@@ -10,7 +10,6 @@ PixPox is a 2D Game Engine built around the concept of simulating physics using 
 <p align="center">
   <img src="https://github.com/martinteoharov/PixPox/assets/43793073/8eab95de-e830-40bf-8ea3-a9233a236807" width="500">
   <img src="https://github.com/martinteoharov/PixPox/assets/43793073/2dbf8cc4-7bb7-42a4-93cb-cab42ad7d252" width="500">
-  Engine Debug UI
 </p>
 
 ## Features
