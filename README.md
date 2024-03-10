@@ -5,17 +5,18 @@
 
 <img src="https://user-images.githubusercontent.com/43793073/234361085-053432ef-b9fe-4581-9795-4ddba162bf0c.png" alt="Image" width="400" height="200">
 
-PixPox is a 2D Game Engine built around the concept of simulating physics using Cellular Automata interactions. As of currently the project only offers the basics for creating a "game" if you can even call it that and only serves as a proof of concept. It is in active development.
+PixPox is a 2D General Purpose Game Engine built around the concept of simulating physics usings Cellular Automata interactions. The project is still in its early stages and only serves as a proof of concept.
 
-  <img src="https://github.com/martinteoharov/PixPox/assets/43793073/8eab95de-e830-40bf-8ea3-a9233a236807">
-  <img src="https://github.com/martinteoharov/PixPox/assets/43793073/2dbf8cc4-7bb7-42a4-93cb-cab42ad7d252">
+Written in Rust and highly paralellised, PixPox aims to provide efficiency through easy-to-use and understand programming patterns.
+
+<img src="https://github.com/martinteoharov/PixPox/assets/43793073/2dbf8cc4-7bb7-42a4-93cb-cab42ad7d252">
 
 ## Features
-- Input handling, event messaging, and resource management abstractions.
-- Entity-Component-System based architecture for scalable and modular project development.
+- Entity-Component-System based architecture for scalable and modular game development.
 - Cellular Automata utilities for building "Falling Sand"-style simulations.
-- Lightweight.
-- Built in Rust for safety and performance.
+- Highly parallelised.
+- Easy to assemble GUI.
+- Input handling.
 
 ## Getting Started
 A good place to start learning how to build projects with PixPox is the devdocs, which showcase the engine's architecture. You can access the devdocs [here](https://martinteoharov.github.io/pixpox-dev-docs/). The latest version of the devdocs is yet to be published. Expected around end of September.
