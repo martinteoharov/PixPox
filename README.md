@@ -34,3 +34,7 @@ RUST_LOG=error cargo run --example ecs --release
 
 ### License
 PixPox is licensed under the MIT License. See the LICENSE file for details.
+
+---
+
+claude was here
